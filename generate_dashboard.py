@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
-"""Generate a dashboard HTML from quota.txt and squeue.json."""
+"""Generate a dashboard HTML from quota.txt, squeue.json, and leadm.txt."""
 
 import json
-import re
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-# ── paths ──────────────────────────────────────────────────────────────────
-SCRIPT_DIR  = Path(__file__).parent
-QUOTA_FILE  = SCRIPT_DIR / "quota.txt"
+
+SCRIPT_DIR = Path(__file__).parent
+QUOTA_FILE = SCRIPT_DIR / "quota.txt"
 SQUEUE_FILE = SCRIPT_DIR / "squeue.json"
+LEADM_FILE = SCRIPT_DIR / "leadm.txt"
 OUTPUT_FILE = SCRIPT_DIR / "dashboard.html"
 
-
-# ── parsers ────────────────────────────────────────────────────────────────
 
 def parse_quota(path: Path) -> list[dict]:
     """Parse quota.txt into a list of dicts."""
@@ -26,22 +23,24 @@ def parse_quota(path: Path) -> list[dict]:
         parts = line.split()
         if len(parts) < 5:
             continue
-        mount   = parts[0]
-        used    = parts[1]
-        free    = parts[2]
-        total   = parts[3]
+        mount = parts[0]
+        used = parts[1]
+        free = parts[2]
+        total = parts[3]
         pct_str = parts[4].rstrip("%")
         try:
             pct = int(pct_str)
         except ValueError:
             pct = 0
-        entries.append({
-            "mount": mount,
-            "used":  used,
-            "free":  free,
-            "total": total,
-            "pct":   pct,
-        })
+        entries.append(
+            {
+                "mount": mount,
+                "used": used,
+                "free": free,
+                "total": total,
+                "pct": pct,
+            }
+        )
     return entries
 
 
@@ -52,37 +51,70 @@ def parse_squeue(path: Path) -> tuple[list[dict], dict]:
     slurm = data.get("meta", {}).get("slurm", {})
     last_update_epoch = data.get("last_update", {}).get("number")
     meta = {
-      "cluster":     slurm.get("cluster", "—"),
-      "slurm_ver":   slurm.get("release", "—"),
-      "last_update": (
-        datetime.fromtimestamp(last_update_epoch, tz=timezone.utc)
-        .astimezone()
-        .strftime("%Y-%m-%d %H:%M")
-        if last_update_epoch else "—"
-      ),
+        "cluster": slurm.get("cluster", "—"),
+        "slurm_ver": slurm.get("release", "—"),
+        "last_update": (
+            datetime.fromtimestamp(last_update_epoch, tz=timezone.utc)
+            .astimezone()
+            .strftime("%Y-%m-%d %H:%M")
+            if last_update_epoch
+            else "—"
+        ),
     }
     return jobs, meta
 
 
-# ── colour helpers ─────────────────────────────────────────────────────────
+def parse_leadm(path: Path) -> list[dict]:
+    """Parse leadm.txt into a list of tape dicts."""
+    entries = []
+    for index, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines()):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if index == 0 and line.startswith("Barcode"):
+            continue
+        parts = line.split()
+        if len(parts) < 6:
+            continue
+
+        barcode, location, used, avail, use_pct = parts[:5]
+        severity = " ".join(parts[5:])
+        try:
+            pct = int(use_pct.rstrip("%"))
+        except ValueError:
+            pct = 0
+
+        entries.append(
+            {
+                "barcode": barcode,
+                "location": location,
+                "used": used,
+                "avail": avail,
+                "use_pct": use_pct,
+                "pct": pct,
+                "severity": severity,
+            }
+        )
+    return entries
+
 
 def pct_color(pct: int) -> str:
     if pct >= 90:
-        return "#ef4444"   # red
+        return "#ef4444"
     if pct >= 70:
-        return "#f97316"   # orange
+        return "#f97316"
     if pct >= 40:
-        return "#eab308"   # yellow
-    return "#22c55e"       # green
+        return "#eab308"
+    return "#22c55e"
 
 
 def job_state_badge(state: str) -> str:
     colours = {
-        "RUNNING":  ("#dcfce7", "#16a34a"),
-        "PENDING":  ("#fef9c3", "#ca8a04"),
-        "FAILED":   ("#fee2e2", "#dc2626"),
-        "COMPLETED":("#f0fdf4", "#15803d"),
-        "CANCELLED":("#f3f4f6", "#6b7280"),
+        "RUNNING": ("#dcfce7", "#16a34a"),
+        "PENDING": ("#fef9c3", "#ca8a04"),
+        "FAILED": ("#fee2e2", "#dc2626"),
+        "COMPLETED": ("#f0fdf4", "#15803d"),
+        "CANCELLED": ("#f3f4f6", "#6b7280"),
     }
     bg, fg = colours.get(state.upper(), ("#e0e7ff", "#4338ca"))
     return (
@@ -91,28 +123,26 @@ def job_state_badge(state: str) -> str:
     )
 
 
-# ── HTML builder ───────────────────────────────────────────────────────────
-
 def build_quota_rows(entries: list[dict]) -> str:
-  rows = []
-  sorted_entries = sorted(entries, key=lambda item: item["pct"], reverse=True)
-  for e in sorted_entries:
-    color = pct_color(e["pct"])
-    bar = (
-      f'<div style="background:#e5e7eb;border-radius:4px;height:10px;min-width:120px;">'
-      f'<div style="background:{color};width:{e["pct"]}%;height:10px;border-radius:4px;'
-      f'transition:width .3s;"></div></div>'
-    )
-    rows.append(
-      f"<tr>"
-      f'<td class="mono">{e["mount"]}</td>'
-      f"<td>{e['used']}</td>"
-      f"<td>{e['free']}</td>"
-      f"<td>{e['total']}</td>"
-      f'<td style="white-space:nowrap;">{bar} <span style="color:{color};font-weight:600;">{e["pct"]}%</span></td>'
-      f"</tr>"
-    )
-  return "\n".join(rows)
+    rows = []
+    sorted_entries = sorted(entries, key=lambda item: item["pct"], reverse=True)
+    for entry in sorted_entries:
+        color = pct_color(entry["pct"])
+        bar = (
+            f'<div style="background:#e5e7eb;border-radius:4px;height:10px;min-width:120px;">'
+            f'<div style="background:{color};width:{entry["pct"]}%;height:10px;border-radius:4px;'
+            f'transition:width .3s;"></div></div>'
+        )
+        rows.append(
+            f"<tr>"
+            f'<td class="mono">{entry["mount"]}</td>'
+            f"<td>{entry['used']}</td>"
+            f"<td>{entry['free']}</td>"
+            f"<td>{entry['total']}</td>"
+            f'<td style="white-space:nowrap;">{bar} <span style="color:{color};font-weight:600;">{entry["pct"]}%</span></td>'
+            f"</tr>"
+        )
+    return "\n".join(rows)
 
 
 def build_job_rows(jobs: list[dict]) -> str:
@@ -120,21 +150,30 @@ def build_job_rows(jobs: list[dict]) -> str:
         return '<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:2rem;">No jobs in queue</td></tr>'
 
     rows = []
-    for j in jobs:
-        # Field names follow Slurm REST API v0.0.44
-        job_id    = j.get("job_id", "—")
-        name      = j.get("name", "—")
-        user      = j.get("user_name", j.get("user", "—"))
-        state     = j.get("job_state", ["—"])[0] if isinstance(j.get("job_state"), list) else j.get("job_state", "—")
-        partition = j.get("partition", "—")
-        nodes     = j.get("node_count", {}).get("number", "—") if isinstance(j.get("node_count"), dict) else j.get("node_count", "—")
-        cpus      = j.get("cpus", {}).get("number", "—") if isinstance(j.get("cpus"), dict) else j.get("cpus", "—")
-        # time_limit
-        tl = j.get("time_limit", {})
-        time_limit = tl.get("number", "—") if isinstance(tl, dict) else tl
+    for job in jobs:
+        job_id = job.get("job_id", "—")
+        name = job.get("name", "—")
+        user = job.get("user_name", job.get("user", "—"))
+        if isinstance(job.get("job_state"), list):
+            state = job.get("job_state", ["—"])[0]
+        else:
+            state = job.get("job_state", "—")
+        partition = job.get("partition", "—")
+        if isinstance(job.get("node_count"), dict):
+            nodes = job.get("node_count", {}).get("number", "—")
+        else:
+            nodes = job.get("node_count", "—")
+        if isinstance(job.get("cpus"), dict):
+            cpus = job.get("cpus", {}).get("number", "—")
+        else:
+            cpus = job.get("cpus", "—")
+
+        time_limit = job.get("time_limit", {})
+        if isinstance(time_limit, dict):
+            time_limit = time_limit.get("number", "—")
         if isinstance(time_limit, int):
-            h, m = divmod(time_limit, 60)
-            time_limit = f"{h}h{m:02d}m"
+            hours, minutes = divmod(time_limit, 60)
+            time_limit = f"{hours}h{minutes:02d}m"
 
         rows.append(
             f"<tr>"
@@ -151,16 +190,37 @@ def build_job_rows(jobs: list[dict]) -> str:
     return "\n".join(rows)
 
 
-def generate_html(quota: list[dict], jobs: list[dict], meta: dict) -> str:
+def build_tape_rows(entries: list[dict]) -> str:
+    if not entries:
+        return '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:2rem;">No tape data</td></tr>'
+
+    rows = []
+    for entry in sorted(entries, key=lambda item: (item["location"], item["barcode"])):
+        color = pct_color(entry["pct"])
+        rows.append(
+            f"<tr>"
+            f'<td class="mono">{entry["barcode"]}</td>'
+            f"<td>{entry['location']}</td>"
+            f"<td>{entry['used']}</td>"
+            f"<td>{entry['avail']}</td>"
+            f'<td style="color:{color};font-weight:600;">{entry["use_pct"]}</td>'
+            f"<td>{entry['severity']}</td>"
+            f"</tr>"
+        )
+    return "\n".join(rows)
+
+
+def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: dict) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     quota_rows = build_quota_rows(quota)
-    job_rows   = build_job_rows(jobs)
-    job_count  = len(jobs)
+    job_rows = build_job_rows(jobs)
+    tape_rows = build_tape_rows(tapes)
+    job_count = len(jobs)
+    tape_count = len(tapes)
 
-    # summary cards
-    total_mounts  = len(quota)
-    critical      = sum(1 for e in quota if e["pct"] >= 90)
-    warning       = sum(1 for e in quota if 70 <= e["pct"] < 90)
+    total_mounts = len(quota)
+    critical = sum(1 for entry in quota if entry["pct"] >= 90)
+    warning = sum(1 for entry in quota if 70 <= entry["pct"] < 90)
 
     return f"""<!DOCTYPE html>
 <html lang="ja">
@@ -193,9 +253,28 @@ def generate_html(quota: list[dict], jobs: list[dict], meta: dict) -> str:
   }}
   .quick-link:hover {{ background: rgba(255, 255, 255, .2); }}
 
-  main {{ padding: 1.5rem 2rem; max-width: 1400px; margin: 0 auto; }}
+  main {{ padding: 1.5rem 2rem 5rem; max-width: 1400px; margin: 0 auto; }}
+  
+  footer {{
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000;
+    background: #f8fafc; border-top: 1px solid #e2e8f0;
+    padding: 1rem 2rem; text-align: right; font-size: .75rem; color: #64748b;
+  }}
+  footer a {{
+    color: #2563eb; text-decoration: none; margin-left: 1.5rem;
+  }}
+  footer a:hover {{ text-decoration: underline; }}
 
-  /* summary cards */
+  .tabs {{ display: flex; gap: .5rem; margin-bottom: 1rem; flex-wrap: wrap; }}
+  .tab-button {{
+    border: 1px solid #cbd5e1; background: #fff; color: #334155;
+    border-radius: 9999px; padding: .45rem .85rem; font-size: .88rem; font-weight: 700;
+    cursor: pointer;
+  }}
+  .tab-button.active {{ background: #2563eb; border-color: #2563eb; color: #fff; }}
+  .tab-panel {{ display: none; }}
+  .tab-panel.active {{ display: block; }}
+
   .cards {{ display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }}
   .card {{
     background: #fff; border-radius: 12px;
@@ -204,12 +283,11 @@ def generate_html(quota: list[dict], jobs: list[dict], meta: dict) -> str:
   }}
   .card .label {{ font-size: .75rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }}
   .card .value {{ font-size: 2rem; font-weight: 700; margin-top: .25rem; }}
-  .card.red .value   {{ color: #ef4444; }}
-  .card.orange .value{{ color: #f97316; }}
-  .card.blue .value  {{ color: #2563eb; }}
-  .card.gray .value  {{ color: #64748b; }}
+  .card.red .value {{ color: #ef4444; }}
+  .card.orange .value {{ color: #f97316; }}
+  .card.blue .value {{ color: #2563eb; }}
+  .card.gray .value {{ color: #64748b; }}
 
-  /* quota filter */
   .filter-bar {{
     padding: .75rem 1.25rem;
     border-bottom: 1px solid #e2e8f0;
@@ -222,7 +300,6 @@ def generate_html(quota: list[dict], jobs: list[dict], meta: dict) -> str:
   }}
   .filter-bar input:focus {{ border-color: #2563eb; box-shadow: 0 0 0 2px #bfdbfe; }}
 
-  /* sections */
   section {{
     background: #fff; border-radius: 12px;
     box-shadow: 0 1px 4px rgba(0,0,0,.08);
@@ -241,7 +318,6 @@ def generate_html(quota: list[dict], jobs: list[dict], meta: dict) -> str:
     min-width: 1.4rem; height: 1.4rem; padding: 0 .35rem;
   }}
 
-  /* tables */
   table {{ width: 100%; border-collapse: collapse; font-size: .875rem; }}
   th {{
     background: #f8fafc; color: #64748b;
@@ -267,18 +343,15 @@ def generate_html(quota: list[dict], jobs: list[dict], meta: dict) -> str:
     <div class="quick-links">
       <a class="quick-link" href="http://ssp.vpn.bio2q.org/" target="_blank" rel="noopener noreferrer">Change Password</a>
       <a class="quick-link" href="http://cryosparc.vpn.bio2q.org/" target="_blank" rel="noopener noreferrer">CryoSPARC</a>
-      <a class="quick-link" href="http://lam.vpn.bio2q.org/" target="_blank" rel="noopener noreferrer">LAM</a>
     </div>
   </div>
   <div class="timestamp">
     Generated: {now}<br>
-      Queue updated: {meta['last_update']}
+    Queue updated: {meta['last_update']}
   </div>
 </header>
 
 <main>
-
-  <!-- Summary cards -->
   <div class="cards">
     <div class="card gray">
       <div class="label">Jobs in Queue</div>
@@ -292,80 +365,132 @@ def generate_html(quota: list[dict], jobs: list[dict], meta: dict) -> str:
       <div class="label">Warning (&ge;70%)</div>
       <div class="value">{warning}</div>
     </div>
+    <div class="card blue">
+      <div class="label">Tape Media</div>
+      <div class="value">{tape_count}</div>
+    </div>
   </div>
 
-  <!-- Job queue -->
-  <section>
-    <div class="section-header">
-      &#x23F3; Job Queue (squeue)
-      <span class="badge">{job_count}</span>
-    </div>
-    <table>
-      <thead>
-        <tr>
-          <th>Job ID</th>
-          <th>Name</th>
-          <th>User</th>
-          <th>State</th>
-          <th>Partition</th>
-          <th>Nodes</th>
-          <th>CPUs</th>
-          <th>Time Limit</th>
-        </tr>
-      </thead>
-      <tbody>
-        {job_rows}
-      </tbody>
-    </table>
-  </section>
+  <div class="tabs" role="tablist" aria-label="Dashboard sections">
+    <button class="tab-button active" type="button" data-tab="jobs" role="tab" aria-selected="true">Job Queue</button>
+    <button class="tab-button" type="button" data-tab="quota" role="tab" aria-selected="false">Disk Quota</button>
+    <button class="tab-button" type="button" data-tab="tape" role="tab" aria-selected="false">Tape</button>
+  </div>
 
-  <!-- Storage quota -->
-  <section>
-    <div class="section-header">
-      &#x1F4BE; Storage Quota
-      <span class="badge">{total_mounts}</span>
-    </div>
-    <div class="filter-bar">
-      <input type="search" id="quota-filter" placeholder="&#128269; マウントパスで絞り込み..." oninput="filterQuota(this.value)">
-    </div>
-    <table>
-      <thead>
-        <tr>
-          <th>Mount</th>
-          <th>Used</th>
-          <th>Free</th>
-          <th>Total</th>
-          <th>Usage</th>
-        </tr>
-      </thead>
-      <tbody id="quota-tbody">
-        {quota_rows}
-      </tbody>
-    </table>
-  </section>
+  <div class="tab-panel active" id="tab-jobs" role="tabpanel">
+    <section>
+      <div class="section-header">
+        &#x23F3; Job Queue (squeue)
+        <span class="badge">{job_count}</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Job ID</th>
+            <th>Name</th>
+            <th>User</th>
+            <th>State</th>
+            <th>Partition</th>
+            <th>Nodes</th>
+            <th>CPUs</th>
+            <th>Time Limit</th>
+          </tr>
+        </thead>
+        <tbody>
+          {job_rows}
+        </tbody>
+      </table>
+    </section>
+  </div>
 
+  <div class="tab-panel" id="tab-quota" role="tabpanel">
+    <section>
+      <div class="section-header">
+        &#x1F4BE; Storage Quota
+        <span class="badge">{total_mounts}</span>
+      </div>
+      <div class="filter-bar">
+        <input type="search" id="quota-filter" placeholder="&#128269; マウントパスで絞り込み..." oninput="filterQuota(this.value)">
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Mount</th>
+            <th>Used</th>
+            <th>Free</th>
+            <th>Total</th>
+            <th>Usage</th>
+          </tr>
+        </thead>
+        <tbody id="quota-tbody">
+          {quota_rows}
+        </tbody>
+      </table>
+    </section>
+  </div>
+
+  <div class="tab-panel" id="tab-tape" role="tabpanel">
+    <section>
+      <div class="section-header">
+        &#x1F4FC; Tape
+        <span class="badge">{tape_count}</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Barcode</th>
+            <th>Location</th>
+            <th>Used</th>
+            <th>Avail</th>
+            <th>Use%</th>
+            <th>Severity</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tape_rows}
+        </tbody>
+      </table>
+    </section>
+  </div>
 </main>
+
+<footer>
+  Admin: <a href="http://lam.vpn.bio2q.org/" target="_blank" rel="noopener noreferrer">LAM</a>
+</footer>
+
 <script>
-function filterQuota(q) {{
+function filterQuota(query) {{
   const rows = document.querySelectorAll('#quota-tbody tr');
-  const lq = q.toLowerCase();
-  rows.forEach(r => {{
-    const mount = r.cells[0] ? r.cells[0].textContent.toLowerCase() : '';
-    r.style.display = mount.includes(lq) ? '' : 'none';
+  const lowercaseQuery = query.toLowerCase();
+  rows.forEach((row) => {{
+    const mount = row.cells[0] ? row.cells[0].textContent.toLowerCase() : '';
+    row.style.display = mount.includes(lowercaseQuery) ? '' : 'none';
   }});
 }}
+
+document.querySelectorAll('.tab-button').forEach((button) => {{
+  button.addEventListener('click', () => {{
+    const tabName = button.dataset.tab;
+    document.querySelectorAll('.tab-button').forEach((item) => {{
+      item.classList.toggle('active', item === button);
+      item.setAttribute('aria-selected', item === button ? 'true' : 'false');
+    }});
+    document.querySelectorAll('.tab-panel').forEach((panel) => {{
+      panel.classList.toggle('active', panel.id === `tab-${{tabName}}`);
+    }});
+  }});
+}});
 </script>
 </body>
 </html>
 """
 
 
-# ── main ───────────────────────────────────────────────────────────────────
-
-def main():
+def main() -> None:
     quota = parse_quota(QUOTA_FILE)
     jobs, meta = parse_squeue(SQUEUE_FILE)
-    html = generate_html(quota, jobs, meta)
+    tapes = parse_leadm(LEADM_FILE)
+    html = generate_html(quota, jobs, tapes, meta)
     OUTPUT_FILE.write_text(html, encoding="utf-8")
     print(f"Dashboard written to: {OUTPUT_FILE}")
 
