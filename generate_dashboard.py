@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a dashboard HTML from quota.txt, squeue.json, and leadm.txt."""
+"""Generate a dashboard HTML from quota.txt, squeue.json, leadm.txt, and sinfo.json."""
 
 import json
 from datetime import datetime, timezone
@@ -10,6 +10,7 @@ SCRIPT_DIR = Path(__file__).parent
 QUOTA_FILE = SCRIPT_DIR / "quota.txt"
 SQUEUE_FILE = SCRIPT_DIR / "squeue.json"
 LEADM_FILE = SCRIPT_DIR / "leadm.txt"
+SINFO_FILE = SCRIPT_DIR / "sinfo.json"
 OUTPUT_FILE = SCRIPT_DIR / "dashboard.html"
 
 
@@ -98,6 +99,62 @@ def parse_leadm(path: Path) -> list[dict]:
     return entries
 
 
+def parse_sinfo(path: Path) -> dict:
+  """Parse sinfo.json and return one record per unique node."""
+  data = json.loads(path.read_text(encoding="utf-8"))
+  sinfo_list = data.get("sinfo", [])
+  if not sinfo_list:
+    return {"nodes": []}
+
+  nodes_by_name: dict[str, dict] = {}
+  for info in sinfo_list:
+    nodes = info.get("nodes", {})
+    cpus = info.get("cpus", {})
+    memory = info.get("memory", {})
+    gres = info.get("gres", {})
+    node_names = nodes.get("nodes", [])
+    if not node_names:
+      continue
+
+    node_name = node_names[0]
+    memory_total = memory.get("maximum", 0)
+    free_min = memory.get("free", {}).get("minimum", {}).get("number", 0)
+    memory_allocated = memory.get("allocated", 0)
+    gres_total = gres.get("total", "")
+    gres_used = gres.get("used", "")
+
+    gpu_total = 0
+    gpu_used = 0
+    if isinstance(gres_total, str) and "gpu:" in gres_total:
+      try:
+        gpu_total = int(gres_total.split("gpu:", 1)[1].split(",", 1)[0])
+      except ValueError:
+        gpu_total = 0
+    if isinstance(gres_used, str) and "gpu:" in gres_used:
+      try:
+        gpu_used = int(gres_used.split("gpu:", 1)[1].split(",", 1)[0])
+      except ValueError:
+        gpu_used = 0
+
+    state = info.get("node", {}).get("state", ["—"])
+    if isinstance(state, list):
+      state = state[0] if state else "—"
+
+    nodes_by_name[node_name] = {
+      "name": node_name,
+      "state": str(state),
+      "cpus_total": cpus.get("total", 0),
+      "cpus_allocated": cpus.get("allocated", 0),
+      "memory_total": memory_total,
+      "memory_allocated": memory_allocated,
+      "memory_free": free_min,
+      "gpu_total": gpu_total,
+      "gpu_used": gpu_used,
+    }
+
+  return {"nodes": [nodes_by_name[name] for name in sorted(nodes_by_name)]}
+
+
 def pct_color(pct: int) -> str:
     if pct >= 90:
         return "#ef4444"
@@ -106,6 +163,21 @@ def pct_color(pct: int) -> str:
     if pct >= 40:
         return "#eab308"
     return "#22c55e"
+
+
+def node_state_badge(state: str) -> str:
+  colours = {
+    "IDLE": ("#ecfdf5", "#16a34a"),
+    "MIXED": ("#fff7ed", "#ea580c"),
+    "ALLOCATED": ("#eff6ff", "#2563eb"),
+    "DOWN": ("#fef2f2", "#dc2626"),
+    "DRAIN": ("#fef2f2", "#b91c1c"),
+  }
+  bg, fg = colours.get(state.upper(), ("#f1f5f9", "#475569"))
+  return (
+    f'<span style="background:{bg};color:{fg};padding:2px 8px;'
+    f'border-radius:9999px;font-size:0.7rem;font-weight:700;">{state}</span>'
+  )
 
 
 def job_state_badge(state: str) -> str:
@@ -210,11 +282,98 @@ def build_tape_rows(entries: list[dict]) -> str:
     return "\n".join(rows)
 
 
-def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: dict) -> str:
+def build_sinfo_charts(sinfo: dict) -> str:
+    """Build resource usage charts HTML for each node."""
+    nodes_data = sinfo.get("nodes", [])
+    if not nodes_data:
+        return '<div style="text-align:center;color:#9ca3af;padding:2rem;">No resource data available</div>'
+    
+    def node_card(node: dict) -> str:
+        name = node.get("name", "—")
+        cpus_total = node.get("cpus_total", 0)
+        cpus_allocated = node.get("cpus_allocated", 0)
+        gpu_total = node.get("gpu_total", 0)
+        gpu_used = node.get("gpu_used", 0)
+        
+        cpu_pct = int((cpus_allocated / max(cpus_total, 1)) * 100) if cpus_total else 0
+        
+        cpu_color = pct_color(cpu_pct)
+        gpu_pct = int((gpu_used / max(gpu_total, 1)) * 100) if gpu_total else 0
+        gpu_color = pct_color(gpu_pct)
+        gpu_section = ""
+        if gpu_total > 0:
+            gpu_section = f'''
+            <div style="margin-top: 1rem;">
+              <div style="font-size: .7rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; margin-bottom: .5rem;">
+                GRES / GPU
+              </div>
+              <div style="display: flex; align-items: center; gap: .75rem;">
+                <div style="flex: 1;">
+                  <div style="background: #e5e7eb; border-radius: 4px; height: 6px; overflow: hidden;">
+                    <div style="background: {gpu_color}; width: {gpu_pct}%; height: 100%; transition: width .3s;"></div>
+                  </div>
+                </div>
+                <div style="font-size: .8rem; font-weight: 600; color: {gpu_color}; min-width: 40px; text-align: right;">
+                  {gpu_pct}%
+                </div>
+              </div>
+              <div style="font-size: .7rem; color: #64748b; margin-top: .3rem;">
+                {gpu_used} / {gpu_total} GPU used
+              </div>
+            </div>
+            '''
+        
+        return f'''
+        <div style="flex: 1; min-width: 280px; margin-bottom: 1rem;">
+          <div style="background: #fff; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08); padding: 1.5rem;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:.75rem; margin-bottom: 1rem;">
+              <div style="font-size: .85rem; color: #1e293b; font-weight: 700; font-family: monospace;">
+                {name}
+              </div>
+              <div>
+                {node_state_badge(node.get("state", "—"))}
+              </div>
+            </div>
+            
+            <!-- CPU -->
+            <div style="margin-bottom: 1.2rem;">
+              <div style="font-size: .7rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; margin-bottom: .5rem;">
+                CPUs
+              </div>
+              <div style="display: flex; align-items: center; gap: .75rem;">
+                <div style="flex: 1;">
+                  <div style="background: #e5e7eb; border-radius: 4px; height: 6px; overflow: hidden;">
+                    <div style="background: {cpu_color}; width: {cpu_pct}%; height: 100%; transition: width .3s;"></div>
+                  </div>
+                </div>
+                <div style="font-size: .8rem; font-weight: 600; color: {cpu_color}; min-width: 40px; text-align: right;">
+                  {cpu_pct}%
+                </div>
+              </div>
+              <div style="font-size: .7rem; color: #64748b; margin-top: .3rem;">
+                {cpus_allocated} / {cpus_total}
+              </div>
+            </div>
+            {gpu_section}
+          </div>
+        </div>
+        '''
+    
+    cards_html = "\n".join(node_card(node) for node in nodes_data)
+    
+    return f'''
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;">
+      {cards_html}
+    </div>
+    '''
+
+
+def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: dict, sinfo: dict) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     quota_rows = build_quota_rows(quota)
     job_rows = build_job_rows(jobs)
     tape_rows = build_tape_rows(tapes)
+    sinfo_charts = build_sinfo_charts(sinfo)
     job_count = len(jobs)
     tape_count = len(tapes)
 
@@ -234,22 +393,32 @@ def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: 
     margin: 0; padding: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     background: #f1f5f9; color: #1e293b;
+    overflow-y: scroll;
   }}
+  html {{ scrollbar-gutter: stable; }}
   header {{
     background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
     color: #fff; padding: 1.25rem 2rem;
-    display: flex; align-items: center; justify-content: space-between;
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 1.5rem; flex-wrap: wrap;
   }}
+  .header-main {{ flex: 1 1 720px; min-width: 0; }}
+  .header-meta {{ flex: 0 0 auto; text-align: right; white-space: nowrap; }}
   header h1 {{ margin: 0; font-size: 1.5rem; font-weight: 700; letter-spacing: .5px; }}
   .subtitle {{ font-size: .8rem; opacity: .75; margin-top: .2rem; }}
   .timestamp {{ font-size: .8rem; opacity: .75; text-align: right; }}
-  .quick-links {{ margin-top: .6rem; display: flex; gap: .5rem; flex-wrap: wrap; }}
+  .quick-links {{
+    margin-top: .7rem; display: flex; flex-wrap: wrap; gap: .5rem;
+    max-width: 100%;
+  }}
   .quick-link {{
     color: #dbeafe; text-decoration: none; font-size: .8rem; font-weight: 600;
     border: 1px solid rgba(219, 234, 254, .45);
-    padding: .25rem .55rem; border-radius: 9999px;
+    padding: .35rem .65rem; border-radius: 9999px;
     background: rgba(255, 255, 255, .08);
     transition: background .2s ease;
+    flex: 0 1 auto;
+    line-height: 1.2;
   }}
   .quick-link:hover {{ background: rgba(255, 255, 255, .2); }}
 
@@ -331,21 +500,27 @@ def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: 
 
   @media (max-width: 640px) {{
     main {{ padding: 1rem; }}
-    header {{ flex-direction: column; align-items: flex-start; gap: .5rem; }}
+    header {{ padding: 1rem; }}
+    .header-main, .header-meta {{ flex: 1 1 100%; text-align: left; }}
+    .header-meta {{ white-space: normal; }}
   }}
 </style>
 </head>
 <body>
 <header>
-  <div>
+  <div class="header-main">
     <h1>&#x1F5A5; Cluster Dashboard</h1>
     <div class="subtitle">Cluster: {meta['cluster']} &nbsp;|&nbsp; Slurm {meta['slurm_ver']}</div>
     <div class="quick-links">
       <a class="quick-link" href="http://ssp.vpn.bio2q.org/" target="_blank" rel="noopener noreferrer">Change Password</a>
+      <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSeSHGU1krKfc1X1_0vqTbbZ7HW2y9K4fCqF-sItrdWY8mzzPg/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request Password Reset</a>
+      <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSe5Vke-08O1U66QRV9c4Hc1biuZ2Riu3GVsS_Hm3Gcq2kKcDA/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request New Account</a>
+      <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSd4LazR45hWELow9vSFOf2cOKo3Jqc-x3L5-B_-JhKF02KBgg/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request VPN Access</a>
+      <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLScyuiOM5egfCpADC-nt7jiwf7QWKahLq0pfhlPsjZEIuz81dQ/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request Disk Quota Increase</a>
       <a class="quick-link" href="http://cryosparc.vpn.bio2q.org/" target="_blank" rel="noopener noreferrer">CryoSPARC</a>
     </div>
   </div>
-  <div class="timestamp">
+  <div class="timestamp header-meta">
     Generated: {now}<br>
     Queue updated: {meta['last_update']}
   </div>
@@ -372,12 +547,22 @@ def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: 
   </div>
 
   <div class="tabs" role="tablist" aria-label="Dashboard sections">
-    <button class="tab-button active" type="button" data-tab="jobs" role="tab" aria-selected="true">Job Queue</button>
+    <button class="tab-button active" type="button" data-tab="resource" role="tab" aria-selected="true">Resources</button>
+    <button class="tab-button" type="button" data-tab="jobs" role="tab" aria-selected="false">Job Queue</button>
     <button class="tab-button" type="button" data-tab="quota" role="tab" aria-selected="false">Disk Quota</button>
     <button class="tab-button" type="button" data-tab="tape" role="tab" aria-selected="false">Tape</button>
   </div>
 
-  <div class="tab-panel active" id="tab-jobs" role="tabpanel">
+  <div class="tab-panel active" id="tab-resource" role="tabpanel">
+    <section>
+      <div class="section-header">
+        &#x1F4CA; Cluster Resources
+      </div>
+      {sinfo_charts}
+    </section>
+  </div>
+
+  <div class="tab-panel" id="tab-jobs" role="tabpanel">
     <section>
       <div class="section-header">
         &#x23F3; Job Queue (squeue)
@@ -490,7 +675,8 @@ def main() -> None:
     quota = parse_quota(QUOTA_FILE)
     jobs, meta = parse_squeue(SQUEUE_FILE)
     tapes = parse_leadm(LEADM_FILE)
-    html = generate_html(quota, jobs, tapes, meta)
+    sinfo = parse_sinfo(SINFO_FILE)
+    html = generate_html(quota, jobs, tapes, meta, sinfo)
     OUTPUT_FILE.write_text(html, encoding="utf-8")
     print(f"Dashboard written to: {OUTPUT_FILE}")
 
