@@ -518,6 +518,7 @@ def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: 
       <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSd4LazR45hWELow9vSFOf2cOKo3Jqc-x3L5-B_-JhKF02KBgg/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request VPN Access</a>
       <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLScyuiOM5egfCpADC-nt7jiwf7QWKahLq0pfhlPsjZEIuz81dQ/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request Disk Quota Increase</a>
       <a class="quick-link" href="http://cryosparc.vpn.bio2q.org/" target="_blank" rel="noopener noreferrer">CryoSPARC</a>
+      <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSd56ZJ-NsfndG1xuJ_Gh-Ze1RBvBP9xN74kYCGrBbdaZd9u1A/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request for Software Installation/Update</a>
     </div>
   </div>
   <div class="timestamp header-meta">
@@ -595,7 +596,7 @@ def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: 
         <span class="badge">{total_mounts}</span>
       </div>
       <div class="filter-bar">
-        <input type="search" id="quota-filter" placeholder="&#128269; マウントパスで絞り込み..." oninput="filterQuota(this.value)">
+        <input type="search" id="quota-filter" placeholder="&#128269; Filter with mount paths..." oninput="filterQuota(this.value)">
       </div>
       <table>
         <thead>
@@ -640,7 +641,11 @@ def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: 
 </main>
 
 <footer>
-  Admin: <a href="http://lam.vpn.bio2q.org/" target="_blank" rel="noopener noreferrer">LAM</a>
+  Admin: 
+  <a href="http://grafana.vpn.bio2q.org" target="_blank" rel="noopener noreferrer">Grafana</a>
+  <a href="https://neon.vpn.bio2q.org:8443/maxview/manager/login.xhtml" target="_blank" rel="noopener noreferrer">maxView (neon)</a>
+  <a href="https://argon.vpn.bio2q.org:8443/maxview/manager/login.xhtml" target="_blank" rel="noopener noreferrer">maxView (argon)</a>
+  <a href="http://gold.vpn.bio2q.org:8080" target="_blank" rel="noopener noreferrer">LAM</a>
 </footer>
 
 <script>
