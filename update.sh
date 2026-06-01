@@ -6,6 +6,8 @@ for d in /home/*/ /em/*data/ /em/analysis/*/; do echo -n "$d "; df -BT --output=
 /opt/slurm/bin/squeue --json > $BASEDIR/squeue.json && \
 /opt/slurm/bin/sinfo -N -l --json > $BASEDIR/sinfo.json && \
 ssh argon leadm tape list > $BASEDIR/leadm.txt && \
+ssh argon  sudo /usr/Arcconf/arcconf getconfig 1 LD > $BASEDIR/arcconf.argon && \
+ssh neon  sudo /usr/Arcconf/arcconf getconfig 1 LD > $BASEDIR/arcconf.neon && \
 /usr/bin/python3 $BASEDIR/generate_dashboard.py && \
 cp $BASEDIR/dashboard.html /usr/share/caddy/index.html
 

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Generate a dashboard HTML from quota.txt, squeue.json, leadm.txt, and sinfo.json."""
+"""Generate a dashboard HTML from quota.txt, squeue.json, leadm.txt, sinfo.json, and arcconf.*."""
 
+import html
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -12,6 +14,11 @@ SQUEUE_FILE = SCRIPT_DIR / "squeue.json"
 LEADM_FILE = SCRIPT_DIR / "leadm.txt"
 SINFO_FILE = SCRIPT_DIR / "sinfo.json"
 OUTPUT_FILE = SCRIPT_DIR / "dashboard.html"
+ARCCONF_FILES = sorted(SCRIPT_DIR.glob("arcconf.*"))
+
+
+def format_local_mtime(path: Path) -> str:
+  return datetime.fromtimestamp(path.stat().st_mtime).astimezone().strftime("%Y-%m-%d %H:%M")
 
 
 def parse_quota(path: Path) -> list[dict]:
@@ -155,6 +162,157 @@ def parse_sinfo(path: Path) -> dict:
   return {"nodes": [nodes_by_name[name] for name in sorted(nodes_by_name)]}
 
 
+def parse_arcconf(path: Path) -> dict:
+    """Parse arcconf output and collect RAID health warnings."""
+    report = {
+        "name": path.name,
+    "updated": format_local_mtime(path),
+        "controllers": None,
+        "logical_devices": [],
+        "issues": [],
+    }
+
+    text = path.read_text(encoding="utf-8", errors="replace")
+    controller_match = re.search(r"Controllers found:\s*(\d+)", text)
+    if controller_match:
+        report["controllers"] = int(controller_match.group(1))
+
+    current_device = None
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        logical_match = re.match(r"Logical Device number\s+(\d+)", line)
+        if logical_match:
+            if current_device is not None:
+                report["logical_devices"].append(current_device)
+            current_device = {
+                "number": int(logical_match.group(1)),
+                "name": "—",
+                "raid_level": "—",
+                "status": "—",
+                "consistency_check": "—",
+            }
+            continue
+
+        if current_device is None:
+            continue
+
+        if line.startswith("Logical Device name"):
+            current_device["name"] = line.split(":", 1)[1].strip()
+            continue
+        if line.startswith("RAID level"):
+            current_device["raid_level"] = line.split(":", 1)[1].strip()
+            continue
+        if line.startswith("Status of Logical Device"):
+            current_device["status"] = line.split(":", 1)[1].strip()
+            if current_device["status"].upper() != "OPTIMAL":
+                report["issues"].append(
+                    f"{path.name} logical device {current_device['number']} ({current_device['name']}): status is {current_device['status']}"
+                )
+            continue
+        if line.startswith("Consistency Check Status"):
+            current_device["consistency_check"] = line.split(":", 1)[1].strip()
+            continue
+
+        device_match = re.match(r"Device\s+(\d+)\s+:+\s*(.+)", line)
+        if device_match:
+            availability = device_match.group(2)
+            availability_upper = availability.upper()
+            if not (
+                availability_upper.startswith("PRESENT")
+                or availability_upper.startswith("DEDICATED HOT-SPARE")
+            ):
+                report["issues"].append(
+                    f"{path.name} device {device_match.group(1)}: {availability}"
+                )
+            for keyword in ("FAILED", "DEGRADED", "OFFLINE", "MISSING", "ERROR", "PREDICTIVE FAILURE"):
+                if keyword in availability_upper:
+                    report["issues"].append(
+                        f"{path.name} device {device_match.group(1)}: {availability}"
+                    )
+                    break
+
+    if current_device is not None:
+        report["logical_devices"].append(current_device)
+
+    return report
+
+
+def build_arcconf_section(reports: list[dict]) -> str:
+  if not reports:
+    return '<div style="padding:1rem 1.25rem;color:#64748b;">No arcconf files found.</div>'
+
+  report_cards = []
+  for report in reports:
+    issue_count = len(report["issues"])
+    badge_bg = "#fef2f2" if issue_count else "#ecfdf5"
+    badge_fg = "#dc2626" if issue_count else "#16a34a"
+    logical_rows = []
+    for device in report["logical_devices"]:
+      logical_rows.append(
+        "<tr>"
+        f"<td style='padding:.45rem .6rem;border-bottom:1px solid #eef2f7;'>{html.escape(str(device['number']))}</td>"
+        f"<td style='padding:.45rem .6rem;border-bottom:1px solid #eef2f7;'>{html.escape(device['name'])}</td>"
+        f"<td style='padding:.45rem .6rem;border-bottom:1px solid #eef2f7;'>{html.escape(device['raid_level'])}</td>"
+        f"<td style='padding:.45rem .6rem;border-bottom:1px solid #eef2f7;'>{html.escape(device['status'])}</td>"
+        f"<td style='padding:.45rem .6rem;border-bottom:1px solid #eef2f7;'>{html.escape(device['consistency_check'])}</td>"
+        "</tr>"
+      )
+    logical_body = "".join(logical_rows)
+    if not logical_body:
+      logical_body = (
+        '<tr><td colspan="5" style="padding:.6rem;color:#9ca3af;text-align:center;">'
+        'No logical devices found'
+        '</td></tr>'
+      )
+
+    logical_table = (
+      '<table style="width:100%;border-collapse:collapse;font-size:.82rem;">'
+      '<thead><tr>'
+      '<th style="background:#f8fafc;color:#64748b;font-size:.7rem;text-transform:uppercase;text-align:left;padding:.45rem .6rem;">#</th>'
+      '<th style="background:#f8fafc;color:#64748b;font-size:.7rem;text-transform:uppercase;text-align:left;padding:.45rem .6rem;">Logical Device</th>'
+      '<th style="background:#f8fafc;color:#64748b;font-size:.7rem;text-transform:uppercase;text-align:left;padding:.45rem .6rem;">RAID</th>'
+      '<th style="background:#f8fafc;color:#64748b;font-size:.7rem;text-transform:uppercase;text-align:left;padding:.45rem .6rem;">Status</th>'
+      '<th style="background:#f8fafc;color:#64748b;font-size:.7rem;text-transform:uppercase;text-align:left;padding:.45rem .6rem;">Consistency</th>'
+      '</tr></thead>'
+      f"<tbody>{logical_body}</tbody>"
+      '</table>'
+    )
+    issue_html = ""
+    if report["issues"]:
+      issue_items = "".join(f"<li>{html.escape(issue)}</li>" for issue in report["issues"])
+      issue_html = (
+        '<div style="margin-top:.9rem;background:#fef2f2;color:#991b1b;border:1px solid #fecaca;border-radius:10px;padding:.75rem .9rem;">'
+        '<div style="font-weight:700;margin-bottom:.35rem;">Warnings</div>'
+        f"<ul style='margin:0;padding-left:1.1rem;'>{issue_items}</ul>"
+        '</div>'
+      )
+
+    report_name = html.escape(report["name"])
+    controllers = report["controllers"] if report["controllers"] is not None else "—"
+    report_cards.append(
+      f'<div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:1rem;box-shadow:0 1px 4px rgba(0,0,0,.06);">'
+      f'<div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:.75rem;">'
+      f'<div style="font-weight:700;">{report_name}</div>'
+      f'<div style="background:{badge_bg};color:{badge_fg};border-radius:9999px;font-size:.72rem;font-weight:700;padding:2px 8px;">{issue_count} warning(s)</div>'
+      '</div>'
+      f'<div style="font-size:.75rem;font-weight:600;color:#64748b;margin-bottom:.75rem;">Updated: {report["updated"]}</div>'
+      f'<div style="font-size:.85rem;color:#475569;margin-bottom:.75rem;">Controllers: {controllers} | Logical devices: {len(report["logical_devices"])}'
+      '</div>'
+      f'{logical_table}'
+      f'{issue_html}'
+      '</div>'
+    )
+
+  return (
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:1rem;padding:1rem 1.25rem 1.25rem;">'
+    f"{''.join(report_cards)}"
+    '</div>'
+  )
+
+
 def pct_color(pct: int) -> str:
     if pct >= 90:
         return "#ef4444"
@@ -163,6 +321,41 @@ def pct_color(pct: int) -> str:
     if pct >= 40:
         return "#eab308"
     return "#22c55e"
+
+
+def parse_size_value(value: str) -> float:
+    match = re.match(r"^\s*(\d+(?:\.\d+)?)\s*([A-Za-z]+)?\s*$", value)
+    if not match:
+        return 0.0
+
+    number = float(match.group(1))
+    unit = (match.group(2) or "").lower()
+    scale = {
+        "b": 1,
+        "byte": 1,
+        "bytes": 1,
+        "k": 1024,
+        "kb": 1024,
+        "kib": 1024,
+        "m": 1024**2,
+        "mb": 1024**2,
+        "mib": 1024**2,
+        "g": 1024**3,
+        "gb": 1024**3,
+        "gib": 1024**3,
+        "t": 1024**4,
+        "tb": 1024**4,
+        "tib": 1024**4,
+        "p": 1024**5,
+        "pb": 1024**5,
+        "pib": 1024**5,
+    }
+    return number * scale.get(unit, 1.0)
+
+
+def parse_tape_percent(value: str) -> float:
+    match = re.search(r"(\d+(?:\.\d+)?)", value)
+    return float(match.group(1)) if match else 0.0
 
 
 def node_state_badge(state: str) -> str:
@@ -207,11 +400,11 @@ def build_quota_rows(entries: list[dict]) -> str:
         )
         rows.append(
             f"<tr>"
-            f'<td class="mono">{entry["mount"]}</td>'
-            f"<td>{entry['used']}</td>"
-            f"<td>{entry['free']}</td>"
-            f"<td>{entry['total']}</td>"
-            f'<td style="white-space:nowrap;">{bar} <span style="color:{color};font-weight:600;">{entry["pct"]}%</span></td>'
+          f'<td class="mono" data-sort-value="{entry["mount"]}">{entry["mount"]}</td>'
+          f'<td data-sort-value="{parse_size_value(entry["used"])}">{entry["used"]}</td>'
+          f'<td data-sort-value="{parse_size_value(entry["free"])}">{entry["free"]}</td>'
+          f'<td data-sort-value="{parse_size_value(entry["total"])}">{entry["total"]}</td>'
+          f'<td data-sort-value="{entry["pct"]}" style="white-space:nowrap;">{bar} <span style="color:{color};font-weight:600;">{entry["pct"]}%</span></td>'
             f"</tr>"
         )
     return "\n".join(rows)
@@ -271,12 +464,12 @@ def build_tape_rows(entries: list[dict]) -> str:
         color = pct_color(entry["pct"])
         rows.append(
             f"<tr>"
-            f'<td class="mono">{entry["barcode"]}</td>'
-            f"<td>{entry['location']}</td>"
-            f"<td>{entry['used']}</td>"
-            f"<td>{entry['avail']}</td>"
-            f'<td style="color:{color};font-weight:600;">{entry["use_pct"]}</td>'
-            f"<td>{entry['severity']}</td>"
+          f'<td class="mono" data-sort-value="{entry["barcode"]}">{entry["barcode"]}</td>'
+          f'<td data-sort-value="{entry["location"]}">{entry["location"]}</td>'
+          f'<td data-sort-value="{parse_size_value(entry["used"])}">{entry["used"]}</td>'
+          f'<td data-sort-value="{parse_size_value(entry["avail"])}">{entry["avail"]}</td>'
+          f'<td data-sort-value="{parse_tape_percent(entry["use_pct"])}" style="color:{color};font-weight:600;">{entry["use_pct"]}</td>'
+          f'<td data-sort-value="{entry["severity"]}">{entry["severity"]}</td>'
             f"</tr>"
         )
     return "\n".join(rows)
@@ -368,14 +561,27 @@ def build_sinfo_charts(sinfo: dict) -> str:
     '''
 
 
-def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: dict, sinfo: dict) -> str:
+def generate_html(
+  quota: list[dict],
+  jobs: list[dict],
+  tapes: list[dict],
+  meta: dict,
+  sinfo: dict,
+  arcconf_reports: list[dict],
+  quota_updated: str,
+  tape_updated: str,
+  resource_updated: str,
+  raid_updated: str,
+) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     quota_rows = build_quota_rows(quota)
     job_rows = build_job_rows(jobs)
     tape_rows = build_tape_rows(tapes)
     sinfo_charts = build_sinfo_charts(sinfo)
+    arcconf_section = build_arcconf_section(arcconf_reports)
     job_count = len(jobs)
     tape_count = len(tapes)
+    raid_warnings = sum(len(report["issues"]) for report in arcconf_reports)
 
     total_mounts = len(quota)
     critical = sum(1 for entry in quota if entry["pct"] >= 90)
@@ -471,7 +677,6 @@ def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: 
 
   section {{
     background: #fff; border-radius: 12px;
-    box-shadow: 0 1px 4px rgba(0,0,0,.08);
     margin-bottom: 1.5rem; overflow: hidden;
   }}
   .section-header {{
@@ -486,6 +691,18 @@ def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: 
     border-radius: 9999px; font-size: .7rem; font-weight: 700;
     min-width: 1.4rem; height: 1.4rem; padding: 0 .35rem;
   }}
+  th.sortable {{
+    cursor: pointer;
+    user-select: none;
+  }}
+  th.sortable::after {{
+    content: "↕";
+    margin-left: .35rem;
+    font-size: .7rem;
+    color: #cbd5e1;
+  }}
+  th.sortable[data-sort-direction="asc"]::after {{ content: "↑"; color: #2563eb; }}
+  th.sortable[data-sort-direction="desc"]::after {{ content: "↓"; color: #2563eb; }}
 
   table {{ width: 100%; border-collapse: collapse; font-size: .875rem; }}
   th {{
@@ -524,7 +741,6 @@ def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: 
   </div>
   <div class="timestamp header-meta">
     Generated: {now}<br>
-    Queue updated: {meta['last_update']}
   </div>
 </header>
 
@@ -534,17 +750,22 @@ def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: 
       <div class="label">Jobs in Queue</div>
       <div class="value">{job_count}</div>
     </div>
-    <div class="card red">
-      <div class="label">Critical (&ge;90%)</div>
-      <div class="value">{critical}</div>
+    <div class="card">
+      <div class="label">Quota</div>
+      <div style="display:grid;gap:.45rem;margin-top:.6rem;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:1rem;">
+          <span style="font-size:.78rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;">Critical</span>
+          <span style="font-size:1.9rem;font-weight:700;line-height:1;color:#64748b;">{critical}</span>
+        </div>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:1rem;">
+          <span style="font-size:.78rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;">Warning</span>
+          <span style="font-size:1.9rem;font-weight:700;line-height:1;color:#64748b;">{warning}</span>
+        </div>
+      </div>
     </div>
-    <div class="card orange">
-      <div class="label">Warning (&ge;70%)</div>
-      <div class="value">{warning}</div>
-    </div>
-    <div class="card blue">
-      <div class="label">Tape Media</div>
-      <div class="value">{tape_count}</div>
+    <div class="card {'red' if raid_warnings else 'gray'}">
+      <div class="label">RAID Health</div>
+      <div class="value">{raid_warnings}</div>
     </div>
   </div>
 
@@ -553,12 +774,14 @@ def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: 
     <button class="tab-button" type="button" data-tab="jobs" role="tab" aria-selected="false">Job Queue</button>
     <button class="tab-button" type="button" data-tab="quota" role="tab" aria-selected="false">Disk Quota</button>
     <button class="tab-button" type="button" data-tab="tape" role="tab" aria-selected="false">Tape</button>
+    <button class="tab-button" type="button" data-tab="raid" role="tab" aria-selected="false">RAID Health</button>
   </div>
 
   <div class="tab-panel active" id="tab-resource" role="tabpanel">
     <section>
-      <div class="section-header">
-        &#x1F4CA; Cluster Resources
+      <div class="section-header" style="justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;">
+        <span>&#x1F4CA; Cluster Resources</span>
+        <span style="font-size:.75rem;font-weight:600;color:#64748b;">Updated: {resource_updated}</span>
       </div>
       {sinfo_charts}
     </section>
@@ -566,9 +789,9 @@ def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: 
 
   <div class="tab-panel" id="tab-jobs" role="tabpanel">
     <section>
-      <div class="section-header">
-        &#x23F3; Job Queue (squeue)
-        <span class="badge">{job_count}</span>
+      <div class="section-header" style="justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;">
+        <span>&#x23F3; Job Queue (squeue) <span class="badge">{job_count}</span></span>
+        <span style="font-size:.75rem;font-weight:600;color:#64748b;">Updated: {meta['last_update']}</span>
       </div>
       <table>
         <thead>
@@ -592,9 +815,9 @@ def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: 
 
   <div class="tab-panel" id="tab-quota" role="tabpanel">
     <section>
-      <div class="section-header">
-        &#x1F4BE; Storage Quota
-        <span class="badge">{total_mounts}</span>
+      <div class="section-header" style="justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;">
+        <span>&#x1F4BE; Storage Quota <span class="badge">{total_mounts}</span></span>
+        <span style="font-size:.75rem;font-weight:600;color:#64748b;">Updated: {quota_updated}</span>
       </div>
       <div class="filter-bar">
         <input type="search" id="quota-filter" placeholder="&#128269; Filter with mount paths..." oninput="filterQuota(this.value)">
@@ -602,11 +825,11 @@ def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: 
       <table>
         <thead>
           <tr>
-            <th>Mount</th>
-            <th>Used</th>
-            <th>Free</th>
-            <th>Total</th>
-            <th>Usage</th>
+            <th class="sortable" data-sort-table="quota" data-sort-column="0" data-sort-type="text">Mount</th>
+            <th class="sortable" data-sort-table="quota" data-sort-column="1" data-sort-type="number">Used</th>
+            <th class="sortable" data-sort-table="quota" data-sort-column="2" data-sort-type="number">Free</th>
+            <th class="sortable" data-sort-table="quota" data-sort-column="3" data-sort-type="number">Total</th>
+            <th class="sortable" data-sort-table="quota" data-sort-column="4" data-sort-type="number">Usage</th>
           </tr>
         </thead>
         <tbody id="quota-tbody">
@@ -618,25 +841,35 @@ def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: 
 
   <div class="tab-panel" id="tab-tape" role="tabpanel">
     <section>
-      <div class="section-header">
-        &#x1F4FC; Tape
-        <span class="badge">{tape_count}</span>
+      <div class="section-header" style="justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;">
+        <span>&#x1F4FC; Tape <span class="badge">{tape_count}</span></span>
+        <span style="font-size:.75rem;font-weight:600;color:#64748b;">Updated: {tape_updated}</span>
       </div>
       <table>
         <thead>
           <tr>
-            <th>Barcode</th>
-            <th>Location</th>
-            <th>Used</th>
-            <th>Avail</th>
-            <th>Use%</th>
-            <th>Severity</th>
+            <th class="sortable" data-sort-table="tape" data-sort-column="0" data-sort-type="text">Barcode</th>
+            <th class="sortable" data-sort-table="tape" data-sort-column="1" data-sort-type="text">Location</th>
+            <th class="sortable" data-sort-table="tape" data-sort-column="2" data-sort-type="number">Used</th>
+            <th class="sortable" data-sort-table="tape" data-sort-column="3" data-sort-type="number">Avail</th>
+            <th class="sortable" data-sort-table="tape" data-sort-column="4" data-sort-type="number">Use%</th>
+            <th class="sortable" data-sort-table="tape" data-sort-column="5" data-sort-type="text">Severity</th>
           </tr>
         </thead>
         <tbody>
           {tape_rows}
         </tbody>
       </table>
+    </section>
+  </div>
+
+  <div class="tab-panel" id="tab-raid" role="tabpanel">
+    <section>
+      <div class="section-header" style="justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;">
+        <span>&#x1F6E0; RAID Health <span class="badge">{raid_warnings}</span></span>
+        <span style="font-size:.75rem;font-weight:600;color:#64748b;">Updated: {", ".join(f'{report["name"]}: {report["updated"]}' for report in arcconf_reports)}</span>
+      </div>
+      {arcconf_section}
     </section>
   </div>
 </main>
@@ -658,6 +891,62 @@ function filterQuota(query) {{
     row.style.display = mount.includes(lowercaseQuery) ? '' : 'none';
   }});
 }}
+
+function parseSortableValue(cell, type) {{
+  if (!cell) {{
+    return '';
+  }}
+  const rawValue = cell.dataset.sortValue ?? cell.textContent.trim();
+  if (type === 'number') {{
+    const numeric = Number(rawValue);
+    return Number.isNaN(numeric) ? 0 : numeric;
+  }}
+  return rawValue.toLowerCase();
+}}
+
+function sortTable(tableName, columnIndex, type, header) {{
+  const tbody = document.querySelector(`#${{tableName}}-tbody`);
+  if (!tbody) {{
+    return;
+  }}
+
+  const currentDirection = header.dataset.sortDirection === 'asc' ? 'asc' : 'desc';
+  const nextDirection = currentDirection === 'asc' ? 'desc' : 'asc';
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+
+  rows.sort((leftRow, rightRow) => {{
+    const leftCell = leftRow.cells[columnIndex];
+    const rightCell = rightRow.cells[columnIndex];
+    const leftValue = parseSortableValue(leftCell, type);
+    const rightValue = parseSortableValue(rightCell, type);
+
+    if (leftValue < rightValue) {{
+      return nextDirection === 'asc' ? -1 : 1;
+    }}
+    if (leftValue > rightValue) {{
+      return nextDirection === 'asc' ? 1 : -1;
+    }}
+    return 0;
+  }});
+
+  rows.forEach((row) => tbody.appendChild(row));
+
+  document.querySelectorAll(`th.sortable[data-sort-table="${{tableName}}"]`).forEach((item) => {{
+    item.dataset.sortDirection = '';
+  }});
+  header.dataset.sortDirection = nextDirection;
+}}
+
+document.querySelectorAll('th.sortable').forEach((header) => {{
+  header.addEventListener('click', () => {{
+    sortTable(
+      header.dataset.sortTable,
+      Number(header.dataset.sortColumn),
+      header.dataset.sortType || 'text',
+      header,
+    );
+  }});
+}});
 
 document.querySelectorAll('.tab-button').forEach((button) => {{
   button.addEventListener('click', () => {{
@@ -682,7 +971,27 @@ def main() -> None:
     jobs, meta = parse_squeue(SQUEUE_FILE)
     tapes = parse_leadm(LEADM_FILE)
     sinfo = parse_sinfo(SINFO_FILE)
-    html = generate_html(quota, jobs, tapes, meta, sinfo)
+    arcconf_reports = [parse_arcconf(path) for path in ARCCONF_FILES]
+    quota_updated = format_local_mtime(QUOTA_FILE)
+    tape_updated = format_local_mtime(LEADM_FILE)
+    resource_updated = format_local_mtime(SINFO_FILE)
+    raid_source_files = ARCCONF_FILES or [SCRIPT_DIR / "arcconf.*"]
+    raid_updated = max((format_local_mtime(path) for path in raid_source_files if path.exists()), default="—")
+    for report in arcconf_reports:
+        for issue in report["issues"]:
+            print(f"WARNING: {issue}")
+    html = generate_html(
+        quota,
+        jobs,
+        tapes,
+        meta,
+        sinfo,
+        arcconf_reports,
+        quota_updated,
+        tape_updated,
+        resource_updated,
+        raid_updated,
+    )
     OUTPUT_FILE.write_text(html, encoding="utf-8")
     print(f"Dashboard written to: {OUTPUT_FILE}")
 
