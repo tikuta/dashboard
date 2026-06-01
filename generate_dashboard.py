@@ -512,6 +512,7 @@ def generate_html(quota: list[dict], jobs: list[dict], tapes: list[dict], meta: 
     <h1>&#x1F5A5; Cluster Dashboard</h1>
     <div class="subtitle">Cluster: {meta['cluster']} &nbsp;|&nbsp; Slurm {meta['slurm_ver']}</div>
     <div class="quick-links">
+      <a class="quick-link" href="https://bio2q.kibe.la/" target="_blank" rel="noopener noreferrer">Wiki</a>
       <a class="quick-link" href="http://ssp.vpn.bio2q.org/" target="_blank" rel="noopener noreferrer">Change Password</a>
       <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSeSHGU1krKfc1X1_0vqTbbZ7HW2y9K4fCqF-sItrdWY8mzzPg/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request Password Reset</a>
       <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSe5Vke-08O1U66QRV9c4Hc1biuZ2Riu3GVsS_Hm3Gcq2kKcDA/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request New Account</a>
