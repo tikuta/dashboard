@@ -850,13 +850,13 @@ def generate_html(
           <tr>
             <th class="sortable" data-sort-table="tape" data-sort-column="0" data-sort-type="text">Barcode</th>
             <th class="sortable" data-sort-table="tape" data-sort-column="1" data-sort-type="text">Location</th>
-            <th class="sortable" data-sort-table="tape" data-sort-column="2" data-sort-type="number">Used</th>
+            <th class="sortable" data-sort-table="tape" data-sort-column="2" data-sort-type="number">Total</th>
             <th class="sortable" data-sort-table="tape" data-sort-column="3" data-sort-type="number">Avail</th>
             <th class="sortable" data-sort-table="tape" data-sort-column="4" data-sort-type="number">Use%</th>
             <th class="sortable" data-sort-table="tape" data-sort-column="5" data-sort-type="text">Severity</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody id="tape-tbody">
           {tape_rows}
         </tbody>
       </table>
