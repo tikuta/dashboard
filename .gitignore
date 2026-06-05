@@ -27,3 +27,7 @@ leadm.txt
 sinfo.json
 arcconf.neon
 arcconf.argon
+kernel.all.cpu.user.bio2q003
+kernel.all.cpu.user.bio2q001
+nvidia.gpuactive.bio2q003
+nvidia.gpuactive.bio2q001

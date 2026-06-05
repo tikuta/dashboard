@@ -15,6 +15,12 @@ LEADM_FILE = SCRIPT_DIR / "leadm.txt"
 SINFO_FILE = SCRIPT_DIR / "sinfo.json"
 OUTPUT_FILE = SCRIPT_DIR / "dashboard.html"
 ARCCONF_FILES = sorted(SCRIPT_DIR.glob("arcconf.*"))
+RESOURCE_SNAPSHOT_FILES = [
+  "kernel.all.cpu.user.bio2q001",
+  "nvidia.gpuactive.bio2q001",
+  "kernel.all.cpu.user.bio2q003",
+  "nvidia.gpuactive.bio2q003",
+]
 
 
 def format_local_mtime(path: Path) -> str:
@@ -160,6 +166,185 @@ def parse_sinfo(path: Path) -> dict:
     }
 
   return {"nodes": [nodes_by_name[name] for name in sorted(nodes_by_name)]}
+
+
+def find_optional_data_file(name: str) -> Path | None:
+    for candidate in (SCRIPT_DIR / name, Path.home() / "Downloads" / name):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def parse_pcp_snapshot(path: Path) -> dict:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    metric = "—"
+    host = "—"
+    semantics = "—"
+    units = "—"
+    samples = "—"
+    data_lines: list[str] = []
+    in_data = False
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            if in_data:
+                data_lines.append("")
+            continue
+
+        if line.startswith("metric:"):
+            metric = line.split(":", 1)[1].strip()
+            continue
+        if line.startswith("host:"):
+            host = line.split(":", 1)[1].strip()
+            continue
+        if line.startswith("semantics:"):
+            semantics = line.split(":", 1)[1].strip()
+            continue
+        if line.startswith("units:"):
+            units = line.split(":", 1)[1].strip()
+            continue
+        if line.startswith("samples:"):
+            samples = line.split(":", 1)[1].strip()
+            in_data = True
+            continue
+
+        if in_data:
+            data_lines.append(line)
+
+    nonblank_lines = [line for line in data_lines if line]
+    series: list[dict] = []
+
+    if len(nonblank_lines) == 1 and re.fullmatch(r"[-+]?\d+(?:\.\d+)?", nonblank_lines[0]):
+        value_text = nonblank_lines[0]
+        try:
+            value = float(value_text)
+        except ValueError:
+            value = 0.0
+        series.append({"label": metric, "value": value, "raw": value_text})
+    elif len(nonblank_lines) >= 2:
+        labels = nonblank_lines[-2].split()
+        values = nonblank_lines[-1].split()
+        for index, value_text in enumerate(values):
+            label = labels[index] if index < len(labels) else f"value{index + 1}"
+            try:
+                value = float(value_text)
+            except ValueError:
+                value = 0.0
+            series.append({"label": label, "value": value, "raw": value_text})
+    elif nonblank_lines:
+        series.append({"label": metric, "value": 0.0, "raw": nonblank_lines[-1]})
+
+    if series:
+        if len(series) == 1:
+            summary = f"{series[0]['raw']} {units}".strip()
+        else:
+            summary = f"{max(item['value'] for item in series):g} max"
+    else:
+        summary = "No data"
+
+    return {
+        "name": path.name,
+        "metric": metric,
+        "host": host,
+        "semantics": semantics,
+        "units": units,
+        "samples": samples,
+        "summary": summary,
+        "series": series,
+        "updated": format_local_mtime(path),
+    }
+
+
+def build_resource_snapshot_cards(snapshots: list[dict]) -> str:
+    if not snapshots:
+        return ""
+
+    snapshots_by_host: dict[str, dict] = {}
+    for snapshot in snapshots:
+        host = snapshot.get("host", "—")
+        entry = snapshots_by_host.setdefault(
+            host,
+            {
+                "host": host,
+                "updated": snapshot.get("updated", "—"),
+                "snapshots": {},
+            },
+        )
+        if snapshot.get("updated", "—") > entry["updated"]:
+            entry["updated"] = snapshot.get("updated", "—")
+        entry["snapshots"][snapshot.get("metric", "—")] = snapshot
+
+    cards = []
+    for host in sorted(snapshots_by_host):
+        node = snapshots_by_host[host]
+        cpu_snapshot = node["snapshots"].get("kernel.all.cpu.user")
+        gpu_snapshot = node["snapshots"].get("nvidia.gpuactive")
+
+        metric_sections = []
+        for label, snapshot, color in (
+            ("CPU User", cpu_snapshot, "#2563eb"),
+            ("GPU Active", gpu_snapshot, "#7c3aed"),
+        ):
+            if not snapshot:
+                continue
+
+            series = snapshot.get("series", [])
+            graph_rows = []
+            if len(series) == 1:
+                value = series[0].get("value", 0.0)
+                bar_width = max(0.0, min(100.0, value))
+                graph_rows.append(
+                    "<div style='display:flex;align-items:center;gap:.75rem;'>"
+                    "<div style='flex:1;'>"
+                    "<div style='background:#e5e7eb;border-radius:9999px;height:8px;overflow:hidden;'>"
+                    f"<div style='background:{color};width:{bar_width}%;height:100%;transition:width .3s;'></div>"
+                    "</div>"
+                    "</div>"
+                    f"<div style='font-size:.8rem;font-weight:700;color:{color};min-width:52px;text-align:right;'>{html.escape(str(series[0].get('raw', '0')))}%</div>"
+                    "</div>"
+                )
+            else:
+                scale = max(100.0, max((item.get("value", 0.0) for item in series), default=0.0))
+                for item in series:
+                    value = item.get("value", 0.0)
+                    bar_width = max(0.0, min(100.0, (value / scale) * 100 if scale else 0.0))
+                    graph_rows.append(
+                        "<div style='display:grid;grid-template-columns:48px 1fr 44px;align-items:center;gap:.5rem;'>"
+                        f"<div style='font-size:.75rem;color:#64748b;font-weight:600;'>{html.escape(str(item.get('label', '')))}</div>"
+                        "<div style='background:#e5e7eb;border-radius:9999px;height:8px;overflow:hidden;'>"
+                        f"<div style='background:{color};width:{bar_width}%;height:100%;transition:width .3s;'></div>"
+                        "</div>"
+                        f"<div style='font-size:.78rem;font-weight:700;color:{color};text-align:right;'>{html.escape(str(item.get('raw', '0')))}%</div>"
+                        "</div>"
+                    )
+
+            metric_sections.append(
+                "<div style='margin-top:1rem;'>"
+                f"<div style='font-size:.7rem;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.5rem;'>{label}</div>"
+                f"<div style='display:grid;gap:.45rem;'>{''.join(graph_rows)}</div>"
+                
+                "</div>"
+            )
+
+        cards.append(
+            "<div style='flex:1;min-width:320px;margin-bottom:1rem;'>"
+            "<div style='background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:1.5rem;'>"
+            f"<div style='display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:1rem;'>"
+            f"<div style='font-size:.85rem;color:#1e293b;font-weight:700;font-family:monospace;'>{html.escape(host)}</div>"
+            f"<div style='font-size:.72rem;color:#64748b;'>Updated: {html.escape(node['updated'])}</div>"
+            "</div>"
+            f"{''.join(metric_sections)}"
+            "</div>"
+            "</div>"
+        )
+
+    return (
+        "<div style='padding:1rem 1.25rem 0;'>"
+        "<div style='display:flex;flex-wrap:wrap;gap:1rem;'>"
+        f"{''.join(cards)}"
+        "</div></div>"
+    )
 
 
 def parse_arcconf(path: Path) -> dict:
@@ -567,6 +752,7 @@ def generate_html(
   tapes: list[dict],
   meta: dict,
   sinfo: dict,
+  resource_snapshots: list[dict],
   arcconf_reports: list[dict],
   quota_updated: str,
   tape_updated: str,
@@ -578,6 +764,7 @@ def generate_html(
     job_rows = build_job_rows(jobs)
     tape_rows = build_tape_rows(tapes)
     sinfo_charts = build_sinfo_charts(sinfo)
+    resource_snapshot_cards = build_resource_snapshot_cards(resource_snapshots)
     arcconf_section = build_arcconf_section(arcconf_reports)
     job_count = len(jobs)
     tape_count = len(tapes)
@@ -614,8 +801,25 @@ def generate_html(
   .subtitle {{ font-size: .8rem; opacity: .75; margin-top: .2rem; }}
   .timestamp {{ font-size: .8rem; opacity: .75; text-align: right; }}
   .quick-links {{
-    margin-top: .7rem; display: flex; flex-wrap: wrap; gap: .5rem;
+    margin-top: .7rem;
+    display: flex;
+    flex-direction: column;
+    gap: .7rem;
     max-width: 100%;
+  }}
+  .link-group {{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .45rem .5rem;
+  }}
+  .link-group-title {{
+    flex: 0 0 100%;
+    color: #bfdbfe;
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
   }}
   .quick-link {{
     color: #dbeafe; text-decoration: none; font-size: .8rem; font-weight: 600;
@@ -729,14 +933,23 @@ def generate_html(
     <h1>&#x1F5A5; Cluster Dashboard</h1>
     <div class="subtitle">Cluster: {meta['cluster']} &nbsp;|&nbsp; Slurm {meta['slurm_ver']}</div>
     <div class="quick-links">
-      <a class="quick-link" href="https://bio2q.kibe.la/" target="_blank" rel="noopener noreferrer">Wiki</a>
-      <a class="quick-link" href="http://ssp.vpn.bio2q.org/" target="_blank" rel="noopener noreferrer">Change Password</a>
-      <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSeSHGU1krKfc1X1_0vqTbbZ7HW2y9K4fCqF-sItrdWY8mzzPg/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request Password Reset</a>
-      <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSe5Vke-08O1U66QRV9c4Hc1biuZ2Riu3GVsS_Hm3Gcq2kKcDA/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request New Account</a>
-      <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSd4LazR45hWELow9vSFOf2cOKo3Jqc-x3L5-B_-JhKF02KBgg/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request VPN Access</a>
-      <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLScyuiOM5egfCpADC-nt7jiwf7QWKahLq0pfhlPsjZEIuz81dQ/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request Disk Quota Increase</a>
-      <a class="quick-link" href="http://cryosparc.vpn.bio2q.org/" target="_blank" rel="noopener noreferrer">CryoSPARC</a>
-      <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSd56ZJ-NsfndG1xuJ_Gh-Ze1RBvBP9xN74kYCGrBbdaZd9u1A/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request for Software Installation/Update</a>
+      <div class="link-group">
+        <div class="link-group-title">Guide</div>
+        <a class="quick-link" href="https://bio2q.kibe.la/" target="_blank" rel="noopener noreferrer">Wiki</a>
+      </div>
+      <div class="link-group">
+        <div class="link-group-title">Account &amp; Access</div>
+        <a class="quick-link" href="http://ssp.vpn.bio2q.org/" target="_blank" rel="noopener noreferrer">Change Password</a>
+        <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSeSHGU1krKfc1X1_0vqTbbZ7HW2y9K4fCqF-sItrdWY8mzzPg/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request Password Reset</a>
+        <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSe5Vke-08O1U66QRV9c4Hc1biuZ2Riu3GVsS_Hm3Gcq2kKcDA/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request New Account</a>
+        <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSd4LazR45hWELow9vSFOf2cOKo3Jqc-x3L5-B_-JhKF02KBgg/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request VPN Access</a>
+        <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLScyuiOM5egfCpADC-nt7jiwf7QWKahLq0pfhlPsjZEIuz81dQ/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request Disk Quota Increase</a>
+      </div>
+      <div class="link-group">
+        <div class="link-group-title">Software</div>
+        <a class="quick-link" href="http://cryosparc.vpn.bio2q.org/" target="_blank" rel="noopener noreferrer">CryoSPARC</a>
+        <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSd56ZJ-NsfndG1xuJ_Gh-Ze1RBvBP9xN74kYCGrBbdaZd9u1A/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request for Software Installation/Update</a>
+      </div>
     </div>
   </div>
   <div class="timestamp header-meta">
@@ -784,6 +997,13 @@ def generate_html(
         <span style="font-size:.75rem;font-weight:600;color:#64748b;">Updated: {resource_updated}</span>
       </div>
       {sinfo_charts}
+    </section>
+
+    <section>
+      <div class="section-header" style="justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap;">
+        <span>&#x1F5A5; Cryo-EM Workstation Resources</span>
+      </div>
+      {resource_snapshot_cards}
     </section>
   </div>
 
@@ -971,6 +1191,11 @@ def main() -> None:
     jobs, meta = parse_squeue(SQUEUE_FILE)
     tapes = parse_leadm(LEADM_FILE)
     sinfo = parse_sinfo(SINFO_FILE)
+    resource_snapshots = []
+    for snapshot_name in RESOURCE_SNAPSHOT_FILES:
+        snapshot_path = find_optional_data_file(snapshot_name)
+        if snapshot_path is not None:
+            resource_snapshots.append(parse_pcp_snapshot(snapshot_path))
     arcconf_reports = [parse_arcconf(path) for path in ARCCONF_FILES]
     quota_updated = format_local_mtime(QUOTA_FILE)
     tape_updated = format_local_mtime(LEADM_FILE)
@@ -986,6 +1211,7 @@ def main() -> None:
         tapes,
         meta,
         sinfo,
+        resource_snapshots,
         arcconf_reports,
         quota_updated,
         tape_updated,
