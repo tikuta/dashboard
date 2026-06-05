@@ -823,8 +823,6 @@ def generate_html(
     font-weight: 700;
     letter-spacing: .06em;
     text-transform: uppercase;
-    border: 1px solid rgba(191, 219, 254, .35);
-    border-radius: 9999px;
     padding: .18rem .45rem;
     background: rgba(30, 58, 95, .18);
   }}
