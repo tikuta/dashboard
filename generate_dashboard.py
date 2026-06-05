@@ -6,6 +6,7 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 
 SCRIPT_DIR = Path(__file__).parent
@@ -168,7 +169,7 @@ def parse_sinfo(path: Path) -> dict:
   return {"nodes": [nodes_by_name[name] for name in sorted(nodes_by_name)]}
 
 
-def find_optional_data_file(name: str) -> Path | None:
+def find_optional_data_file(name: str) -> Optional[Path]:
     for candidate in (SCRIPT_DIR / name, Path.home() / "Downloads" / name):
         if candidate.exists():
             return candidate
