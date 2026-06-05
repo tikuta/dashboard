@@ -802,30 +802,36 @@ def generate_html(
   .subtitle {{ font-size: .8rem; opacity: .75; margin-top: .2rem; }}
   .timestamp {{ font-size: .8rem; opacity: .75; text-align: right; }}
   .quick-links {{
-    margin-top: .7rem;
+    margin-top: .55rem;
     display: flex;
-    flex-direction: column;
-    gap: .7rem;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: .65rem;
     max-width: 100%;
   }}
   .link-group {{
-    display: flex;
-    flex-wrap: wrap;
+    display: inline-flex;
     align-items: center;
-    gap: .45rem .5rem;
+    gap: .35rem;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
   }}
   .link-group-title {{
-    flex: 0 0 100%;
+    flex: 0 0 auto;
     color: #bfdbfe;
-    font-size: .72rem;
+    font-size: .68rem;
     font-weight: 700;
     letter-spacing: .06em;
     text-transform: uppercase;
+    border: 1px solid rgba(191, 219, 254, .35);
+    border-radius: 9999px;
+    padding: .18rem .45rem;
+    background: rgba(30, 58, 95, .18);
   }}
   .quick-link {{
-    color: #dbeafe; text-decoration: none; font-size: .8rem; font-weight: 600;
+    color: #dbeafe; text-decoration: none; font-size: .76rem; font-weight: 600;
     border: 1px solid rgba(219, 234, 254, .45);
-    padding: .35rem .65rem; border-radius: 9999px;
+    padding: .26rem .55rem; border-radius: 9999px;
     background: rgba(255, 255, 255, .08);
     transition: background .2s ease;
     flex: 0 1 auto;
