@@ -803,9 +803,10 @@ def generate_html(
     raid_warnings = sum(len(report["issues"]) for report in arcconf_reports)
     log_notice = html.escape(log_first_line)
     log_other_escaped = [html.escape(line) for line in log_other_lines]
+    log_other_text = "\n".join(log_other_escaped)
     log_notice_details = (
       '<details class="notice-details"><summary>Show more</summary>'
-      f'<pre>{"\\n".join(log_other_escaped)}</pre></details>'
+      f'<pre>{log_other_text}</pre></details>'
       if log_other_escaped
       else ""
     )
