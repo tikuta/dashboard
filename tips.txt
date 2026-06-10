@@ -1,0 +1,2 @@
+For Cryo-EM users: Use `cp --reflink=always` if you want to copy from /em/kriosdata to /em/analysis. This is blazingly fast than usual `cp` or `rsync`.
+Archiving: Do not write many small files directly to tapes. Zip your data before writing to tape.

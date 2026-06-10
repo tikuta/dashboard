@@ -1,0 +1,3 @@
+2026/6/10   Dashboard updated: Tabs are now automatically reloading upon switching.
+2026/6/10   Root password changed.
+2026/6/9    Fixed: Delayed CryoSPARC Live file detection
