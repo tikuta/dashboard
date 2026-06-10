@@ -14,6 +14,8 @@ QUOTA_FILE = SCRIPT_DIR / "quota.txt"
 SQUEUE_FILE = SCRIPT_DIR / "squeue.json"
 LEADM_FILE = SCRIPT_DIR / "leadm.txt"
 SINFO_FILE = SCRIPT_DIR / "sinfo.json"
+LOG_FILE = SCRIPT_DIR / "log.txt"
+TIPS_FILE = SCRIPT_DIR / "tips.txt"
 OUTPUT_FILE = SCRIPT_DIR / "dashboard.html"
 ARCCONF_FILES = sorted(SCRIPT_DIR.glob("arcconf.*"))
 RESOURCE_SNAPSHOT_FILES = [
@@ -167,6 +169,32 @@ def parse_sinfo(path: Path) -> dict:
     }
 
   return {"nodes": [nodes_by_name[name] for name in sorted(nodes_by_name)]}
+
+
+def parse_log_notice(path: Path) -> tuple[str, list[str]]:
+  if not path.exists():
+    return "", []
+
+  lines: list[str] = []
+  for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    line = raw_line.rstrip()
+    if line.strip():
+      lines.append(line)
+
+  if not lines:
+    return "", []
+  return lines[0], lines[1:]
+
+
+def parse_tips(path: Path) -> list[str]:
+  if not path.exists():
+    return []
+  tips: list[str] = []
+  for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    line = raw_line.strip()
+    if line:
+      tips.append(line)
+  return tips
 
 
 def find_optional_data_file(name: str) -> Optional[Path]:
@@ -755,6 +783,9 @@ def generate_html(
   sinfo: dict,
   resource_snapshots: list[dict],
   arcconf_reports: list[dict],
+  log_first_line: str,
+  log_other_lines: list[str],
+  tips: list[str],
   quota_updated: str,
   tape_updated: str,
   resource_updated: str,
@@ -770,6 +801,15 @@ def generate_html(
     job_count = len(jobs)
     tape_count = len(tapes)
     raid_warnings = sum(len(report["issues"]) for report in arcconf_reports)
+    log_notice = html.escape(log_first_line)
+    log_other_escaped = [html.escape(line) for line in log_other_lines]
+    log_notice_details = (
+      '<details class="notice-details"><summary>Show more</summary>'
+      f'<pre>{"\\n".join(log_other_escaped)}</pre></details>'
+      if log_other_escaped
+      else ""
+    )
+    tips_json = json.dumps(tips, ensure_ascii=False)
 
     total_mounts = len(quota)
     critical = sum(1 for entry in quota if entry["pct"] >= 90)
@@ -800,6 +840,27 @@ def generate_html(
   .header-meta {{ flex: 0 0 auto; text-align: right; white-space: nowrap; }}
   header h1 {{ margin: 0; font-size: 1.5rem; font-weight: 700; letter-spacing: .5px; }}
   .subtitle {{ font-size: .8rem; opacity: .75; margin-top: .2rem; }}
+  .notice {{ font-size: .8rem; opacity: .9; margin-top: .35rem; color: #fde68a; font-weight: 600; }}
+  .notice-details {{ margin-top: .25rem; font-size: .76rem; color: #dbeafe; }}
+  .notice-details summary {{ cursor: pointer; user-select: none; font-weight: 600; }}
+  .notice-details pre {{ margin: .4rem 0 0; white-space: pre-wrap; font-family: "SF Mono", "Fira Code", "Consolas", monospace; }}
+  .tip-boundary-wrap {{
+    max-width: 1400px;
+    margin: .28rem auto 0;
+    padding: 0 2rem;
+    position: relative;
+    z-index: 2;
+  }}
+  .tip {{
+    display: block;
+    margin: 0;
+    padding: .2rem .45rem;
+    font-size: .8rem;
+    font-weight: 600;
+    color: #1e40af;
+    background: #e0f2fe;
+  }}
+  .tip-label {{ color: #2563eb; margin-right: .2rem; }}
   .timestamp {{ font-size: .8rem; opacity: .75; text-align: right; }}
   .quick-links {{
     margin-top: .55rem;
@@ -837,7 +898,7 @@ def generate_html(
   }}
   .quick-link:hover {{ background: rgba(255, 255, 255, .2); }}
 
-  main {{ padding: 1.5rem 2rem 5rem; max-width: 1400px; margin: 0 auto; }}
+  main {{ padding: 2rem 2rem 5rem; max-width: 1400px; margin: 0 auto; }}
   
   footer {{
     position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000;
@@ -929,6 +990,8 @@ def generate_html(
     header {{ padding: 1rem; }}
     .header-main, .header-meta {{ flex: 1 1 100%; text-align: left; }}
     .header-meta {{ white-space: normal; }}
+    .tip-boundary-wrap {{ padding: 0 1rem; margin-top: .25rem; }}
+    .tip {{ max-width: 100%; }}
   }}
 </style>
 </head>
@@ -937,6 +1000,8 @@ def generate_html(
   <div class="header-main">
     <h1>&#x1F5A5; Cluster Dashboard</h1>
     <div class="subtitle">Cluster: {meta['cluster']} &nbsp;|&nbsp; Slurm {meta['slurm_ver']}</div>
+    {f'<div class="notice">Notice: {log_notice}</div>' if log_notice else ''}
+    {log_notice_details}
     <div class="quick-links">
       <div class="link-group">
         <div class="link-group-title">Guide</div>
@@ -961,6 +1026,10 @@ def generate_html(
     Generated: {now}<br>
   </div>
 </header>
+
+<div class="tip-boundary-wrap">
+  <div class="tip" id="tip-line"><span class="tip-label">Tip:</span><span id="tip-text">Loading...</span></div>
+</div>
 
 <main>
   <div class="cards">
@@ -1108,6 +1177,22 @@ def generate_html(
 </footer>
 
 <script>
+const dashboardTips = {tips_json};
+
+function pickRandomTip() {{
+  if (!dashboardTips.length) {{
+    return '';
+  }}
+  const index = Math.floor(Math.random() * dashboardTips.length);
+  return dashboardTips[index];
+}}
+
+const tipText = document.getElementById('tip-text');
+if (tipText) {{
+  const selectedTip = pickRandomTip();
+  tipText.textContent = selectedTip || 'No tips available';
+}}
+
 function filterQuota(query) {{
   const rows = document.querySelectorAll('#quota-tbody tr');
   const lowercaseQuery = query.toLowerCase();
@@ -1173,16 +1258,32 @@ document.querySelectorAll('th.sortable').forEach((header) => {{
   }});
 }});
 
+function setActiveTab(tabName) {{
+  const buttons = Array.from(document.querySelectorAll('.tab-button'));
+  const validTabNames = new Set(buttons.map((button) => button.dataset.tab));
+  const targetTab = validTabNames.has(tabName) ? tabName : 'resource';
+
+  buttons.forEach((button) => {{
+    const isActive = button.dataset.tab === targetTab;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  }});
+
+  document.querySelectorAll('.tab-panel').forEach((panel) => {{
+    panel.classList.toggle('active', panel.id === `tab-${{targetTab}}`);
+  }});
+}}
+
+const currentParams = new URLSearchParams(window.location.search);
+const initialTab = (currentParams.get('tab') || 'resource').toLowerCase();
+setActiveTab(initialTab);
+
 document.querySelectorAll('.tab-button').forEach((button) => {{
   button.addEventListener('click', () => {{
-    const tabName = button.dataset.tab;
-    document.querySelectorAll('.tab-button').forEach((item) => {{
-      item.classList.toggle('active', item === button);
-      item.setAttribute('aria-selected', item === button ? 'true' : 'false');
-    }});
-    document.querySelectorAll('.tab-panel').forEach((panel) => {{
-      panel.classList.toggle('active', panel.id === `tab-${{tabName}}`);
-    }});
+    const tabName = button.dataset.tab || 'resource';
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set('tab', tabName);
+    window.location.href = nextUrl.toString();
   }});
 }});
 </script>
@@ -1196,6 +1297,8 @@ def main() -> None:
     jobs, meta = parse_squeue(SQUEUE_FILE)
     tapes = parse_leadm(LEADM_FILE)
     sinfo = parse_sinfo(SINFO_FILE)
+    log_first_line, log_other_lines = parse_log_notice(LOG_FILE)
+    tips = parse_tips(TIPS_FILE)
     resource_snapshots = []
     for snapshot_name in RESOURCE_SNAPSHOT_FILES:
         snapshot_path = find_optional_data_file(snapshot_name)
@@ -1218,6 +1321,9 @@ def main() -> None:
         sinfo,
         resource_snapshots,
         arcconf_reports,
+        log_first_line,
+        log_other_lines,
+        tips,
         quota_updated,
         tape_updated,
         resource_updated,
