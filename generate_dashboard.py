@@ -986,6 +986,15 @@ def generate_html(
   tr:hover td {{ background: #f8fafc; }}
   .mono {{ font-family: "SF Mono", "Fira Code", "Consolas", monospace; font-size: .8rem; }}
 
+  @keyframes stale-blink {{
+    0%, 49% {{ opacity: 1; }}
+    50%, 100% {{ opacity: 0; }}
+  }}
+  .stale-date {{
+    color: #ef4444 !important;
+    animation: stale-blink 1s step-start infinite;
+  }}
+
   @media (max-width: 640px) {{
     main {{ padding: 1rem; }}
     header {{ padding: 1rem; }}
@@ -1287,7 +1296,40 @@ document.querySelectorAll('.tab-button').forEach((button) => {{
     window.location.href = nextUrl.toString();
   }});
 }});
-</script>
+
+(function checkStaleDates() {{
+  const now = new Date();
+  const THRESHOLD_MS = 5 * 60 * 1000;
+  const datePattern = /(\\d{{4}}-\\d{{2}}-\\d{{2}} \\d{{2}}:\\d{{2}})/g;
+
+  const walker = document.createTreeWalker(
+    document.body,
+    NodeFilter.SHOW_TEXT,
+    {{
+      acceptNode(node) {{
+        return /Updated:|Generated:/.test(node.nodeValue)
+          ? NodeFilter.FILTER_ACCEPT
+          : NodeFilter.FILTER_SKIP;
+      }},
+    }},
+  );
+
+  let node;
+  while ((node = walker.nextNode())) {{
+    const matches = [...node.nodeValue.matchAll(datePattern)];
+    if (!matches.length) continue;
+
+    const isStale = matches.some(([, dateStr]) => {{
+      const d = new Date(dateStr.replace(' ', 'T'));
+      return !Number.isNaN(d.getTime()) && now - d > THRESHOLD_MS;
+    }});
+
+    if (isStale) {{
+      const parent = node.parentElement;
+      if (parent) parent.classList.add('stale-date');
+    }}
+  }}
+}}());\n</script>
 </body>
 </html>
 """
