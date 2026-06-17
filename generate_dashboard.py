@@ -572,6 +572,19 @@ def parse_tape_percent(value: str) -> float:
     return float(match.group(1)) if match else 0.0
 
 
+def tape_assigned_owner(barcode: str) -> str:
+  match = re.search(r"(\d+)(?=L\d+$)", barcode)
+  if not match:
+    return "—"
+
+  slot = int(match.group(1)) % 100
+  if 20 <= slot <= 29:
+    return "cryoem (auto-backup)"
+  if 30 <= slot <= 39:
+    return "genome & quantum"
+  return "—"
+
+
 def node_state_badge(state: str) -> str:
   colours = {
     "IDLE": ("#ecfdf5", "#16a34a"),
@@ -671,15 +684,17 @@ def build_job_rows(jobs: list[dict]) -> str:
 
 def build_tape_rows(entries: list[dict]) -> str:
     if not entries:
-        return '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:2rem;">No tape data</td></tr>'
+        return '<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:2rem;">No tape data</td></tr>'
 
     rows = []
     for entry in sorted(entries, key=lambda item: (item["location"], item["barcode"])):
         color = pct_color(entry["pct"])
+        owner = tape_assigned_owner(entry["barcode"])
         rows.append(
             f"<tr>"
           f'<td class="mono" data-sort-value="{entry["barcode"]}">{entry["barcode"]}</td>'
           f'<td data-sort-value="{entry["location"]}">{entry["location"]}</td>'
+          f'<td data-sort-value="{owner}">{html.escape(owner)}</td>'
           f'<td data-sort-value="{parse_size_value(entry["used"])}">{entry["used"]}</td>'
           f'<td data-sort-value="{parse_size_value(entry["avail"])}">{entry["avail"]}</td>'
           f'<td data-sort-value="{parse_tape_percent(entry["use_pct"])}" style="color:{color};font-weight:600;">{entry["use_pct"]}</td>'
@@ -1154,10 +1169,11 @@ def generate_html(
           <tr>
             <th class="sortable" data-sort-table="tape" data-sort-column="0" data-sort-type="text">Barcode</th>
             <th class="sortable" data-sort-table="tape" data-sort-column="1" data-sort-type="text">Location</th>
-            <th class="sortable" data-sort-table="tape" data-sort-column="2" data-sort-type="number">Total</th>
-            <th class="sortable" data-sort-table="tape" data-sort-column="3" data-sort-type="number">Avail</th>
-            <th class="sortable" data-sort-table="tape" data-sort-column="4" data-sort-type="number">Use%</th>
-            <th class="sortable" data-sort-table="tape" data-sort-column="5" data-sort-type="text">Severity</th>
+            <th class="sortable" data-sort-table="tape" data-sort-column="2" data-sort-type="text">Assigned Owner</th>
+            <th class="sortable" data-sort-table="tape" data-sort-column="3" data-sort-type="number">Total</th>
+            <th class="sortable" data-sort-table="tape" data-sort-column="4" data-sort-type="number">Avail</th>
+            <th class="sortable" data-sort-table="tape" data-sort-column="5" data-sort-type="number">Use%</th>
+            <th class="sortable" data-sort-table="tape" data-sort-column="6" data-sort-type="text">Severity</th>
           </tr>
         </thead>
         <tbody id="tape-tbody">
