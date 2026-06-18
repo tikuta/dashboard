@@ -1,4 +1,4 @@
-2026/6/14   SYSTEM FAILURE: argon (/home) is failing. The vendor will visit to fix it on next Friday.
+2026/6/14   SYSTEM FAILURE: neon (/home) is failing. The vendor will visit to fix it on next Friday (6/18).
 2026/6/10   Dashboard updated: Tabs are now automatically reloading upon switching.
 2026/6/10   Root password changed.
 2026/6/9    Fixed: Delayed CryoSPARC Live file detection
