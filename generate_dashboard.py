@@ -166,9 +166,17 @@ def parse_sinfo(path: Path) -> dict:
       "memory_free": free_min,
       "gpu_total": gpu_total,
       "gpu_used": gpu_used,
+      "gres_total": gres_total if isinstance(gres_total, str) else "",
+      "gres_used": gres_used if isinstance(gres_used, str) else "",
     }
 
-  return {"nodes": [nodes_by_name[name] for name in sorted(nodes_by_name)]}
+  def _node_sort_key(name: str) -> tuple:
+    """Sort argon after gpu/cpu nodes."""
+    if name == "argon":
+      return (1, name)
+    return (0, name)
+
+  return {"nodes": [nodes_by_name[name] for name in sorted(nodes_by_name, key=_node_sort_key)]}
 
 
 def parse_log_notice(path: Path) -> tuple[str, list[str]]:
@@ -723,6 +731,8 @@ def build_sinfo_charts(sinfo: dict) -> str:
         gpu_pct = int((gpu_used / max(gpu_total, 1)) * 100) if gpu_total else 0
         gpu_color = pct_color(gpu_pct)
         gpu_section = ""
+        gres_total = node.get("gres_total", "")
+        gres_used = node.get("gres_used", "")
         if gpu_total > 0:
             gpu_section = f'''
             <div style="margin-top: 1rem;">
@@ -742,6 +752,51 @@ def build_sinfo_charts(sinfo: dict) -> str:
               <div style="font-size: .7rem; color: #64748b; margin-top: .3rem;">
                 {gpu_used} / {gpu_total} GPU used
               </div>
+            </div>
+            '''
+        elif gres_total:
+            # Parse "type:count[,...]" pairs for each resource
+            def _parse_gres_pairs(s: str) -> dict[str, int]:
+                out: dict[str, int] = {}
+                for part in s.split(","):
+                    part = part.strip()
+                    if ":" in part:
+                        k, _, v = part.partition(":")
+                        try:
+                            out[k.strip()] = int(v.strip())
+                        except ValueError:
+                            pass
+                return out
+
+            gres_total_map = _parse_gres_pairs(gres_total)
+            gres_used_map = _parse_gres_pairs(gres_used)
+
+            gres_bars = ""
+            for res_type, res_total in gres_total_map.items():
+                res_used = gres_used_map.get(res_type, 0)
+                res_pct = int((res_used / max(res_total, 1)) * 100)
+                res_color = pct_color(res_pct)
+                gres_bars += f'''
+              <div style="display: flex; align-items: center; gap: .75rem;">
+                <div style="flex: 1;">
+                  <div style="background: #e5e7eb; border-radius: 4px; height: 6px; overflow: hidden;">
+                    <div style="background: {res_color}; width: {res_pct}%; height: 100%; transition: width .3s;"></div>
+                  </div>
+                </div>
+                <div style="font-size: .8rem; font-weight: 600; color: {res_color}; min-width: 40px; text-align: right;">
+                  {res_pct}%
+                </div>
+              </div>
+              <div style="font-size: .7rem; color: #64748b; margin-top: .3rem;">
+                {res_used} / {res_total} {html.escape(res_type.upper())} used
+              </div>'''
+
+            gpu_section = f'''
+            <div style="margin-top: 1rem;">
+              <div style="font-size: .7rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; margin-bottom: .5rem;">
+                GRES / TAPEDRIVE
+              </div>
+              {gres_bars}
             </div>
             '''
         
@@ -1035,15 +1090,16 @@ def generate_html(
       <div class="link-group">
         <div class="link-group-title">Account &amp; Access</div>
         <a class="quick-link" href="http://ssp.vpn.bio2q.org/" target="_blank" rel="noopener noreferrer">Change Password</a>
-        <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSeSHGU1krKfc1X1_0vqTbbZ7HW2y9K4fCqF-sItrdWY8mzzPg/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request Password Reset</a>
-        <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSe5Vke-08O1U66QRV9c4Hc1biuZ2Riu3GVsS_Hm3Gcq2kKcDA/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request New Account</a>
-        <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSd4LazR45hWELow9vSFOf2cOKo3Jqc-x3L5-B_-JhKF02KBgg/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request VPN Access</a>
-        <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLScyuiOM5egfCpADC-nt7jiwf7QWKahLq0pfhlPsjZEIuz81dQ/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request Disk Quota Increase</a>
+        <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSeSHGU1krKfc1X1_0vqTbbZ7HW2y9K4fCqF-sItrdWY8mzzPg/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Reset Password</a>
+        <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSe5Vke-08O1U66QRV9c4Hc1biuZ2Riu3GVsS_Hm3Gcq2kKcDA/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">New Account</a>
+        <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLScf2_SWZfao5emiJ2fZK6IMBKAUre4bHZGgzYO7_GZfM-cLTQ/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">New Group</a>
+        <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSd4LazR45hWELow9vSFOf2cOKo3Jqc-x3L5-B_-JhKF02KBgg/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">VPN Access for non-Keio users</a>
+        <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLScyuiOM5egfCpADC-nt7jiwf7QWKahLq0pfhlPsjZEIuz81dQ/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Increase Disk Quota</a>
       </div>
       <div class="link-group">
         <div class="link-group-title">Software</div>
         <a class="quick-link" href="http://cryosparc.vpn.bio2q.org/" target="_blank" rel="noopener noreferrer">CryoSPARC</a>
-        <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSd56ZJ-NsfndG1xuJ_Gh-Ze1RBvBP9xN74kYCGrBbdaZd9u1A/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Request for Software Installation/Update</a>
+        <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSd56ZJ-NsfndG1xuJ_Gh-Ze1RBvBP9xN74kYCGrBbdaZd9u1A/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Software Installation/Update</a>
       </div>
     </div>
   </div>
@@ -1199,6 +1255,7 @@ def generate_html(
   <a href="http://grafana.vpn.bio2q.org" target="_blank" rel="noopener noreferrer">Grafana</a>
   <a href="https://neon.vpn.bio2q.org:8443/maxview/manager/login.xhtml" target="_blank" rel="noopener noreferrer">maxView (neon)</a>
   <a href="https://argon.vpn.bio2q.org:8443/maxview/manager/login.xhtml" target="_blank" rel="noopener noreferrer">maxView (argon)</a>
+  <a href="https://10.181.64.36/login.php" target="_blank" rel="noopener noreferrer">TS4300</a>
   <a href="http://gold.vpn.bio2q.org:8080" target="_blank" rel="noopener noreferrer">LAM</a>
 </footer>
 

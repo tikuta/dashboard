@@ -1,3 +1,7 @@
+2026/6/24   Archive queue (tape) starts working.
+2026/6/23   Cluster nodes (cpu01-04, gpu01-02) are now mounting /home via autofs.
+2026/6/19   System failure on neon (/home) is now recovered.
+2026/6/17   Cluster nodes (cpu01-04, gpu01-02) are now mounting /em via autofs.
 2026/6/14   SYSTEM FAILURE: neon (/home) is failing. The vendor will visit to fix it on next Friday (6/18).
 2026/6/10   Dashboard updated: Tabs are now automatically reloading upon switching.
 2026/6/10   Root password changed.
