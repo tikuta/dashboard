@@ -162,7 +162,7 @@ section {
   padding: 1rem;
 }
 .top-grid {
-  grid-template-columns: 1fr 2fr;
+  grid-template-columns: 1fr 3fr;
   align-items: stretch;
 }
 .top-grid .grafana-embed {
