@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cluster Dashboard</title>
+<link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+<header>
+  <h1>Cluster Dashboard</h1>
+  <div class="notice">Notice: 2026/6/30 Monitoring is now available via grafana.</div>
+  <details class="notice-details">
+    <summary>Show more</summary>
+    <pre>2026/6/24   Archive queue (tape) starts working.
+2026/6/23   Cluster nodes (cpu01-04, gpu01-02) are now mounting /home via autofs.
+2026/6/19   System failure on neon (/home) is now recovered.
+2026/6/17   Cluster nodes (cpu01-04, gpu01-02) are now mounting /em via autofs.
+2026/6/14   SYSTEM FAILURE: neon (/home) is failing. The vendor will visit to fix it on next Friday (6/18).
+2026/6/10   Dashboard updated: Tabs are now automatically reloading upon switching.
+2026/6/10   Root password changed.
+2026/6/9    Fixed: Delayed CryoSPARC Live file detection</pre>
+  </details>
+  <div class="quick-links">
+    <div class="link-group">
+      <span class="link-group-title">Guide</span>
+      <a class="quick-link" href="https://bio2q.kibe.la/" target="_blank" rel="noopener noreferrer">Wiki</a>
+    </div>
+    <div class="link-group">
+      <span class="link-group-title">Account &amp; Access</span>
+      <a class="quick-link" href="http://ssp.vpn.bio2q.org/" target="_blank" rel="noopener noreferrer">Change Password</a>
+      <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSeSHGU1krKfc1X1_0vqTbbZ7HW2y9K4fCqF-sItrdWY8mzzPg/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Reset Password</a>
+      <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSe5Vke-08O1U66QRV9c4Hc1biuZ2Riu3GVsS_Hm3Gcq2kKcDA/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">New Account</a>
+      <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLScf2_SWZfao5emiJ2fZK6IMBKAUre4bHZGgzYO7_GZfM-cLTQ/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">New Group</a>
+      <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSd4LazR45hWELow9vSFOf2cOKo3Jqc-x3L5-B_-JhKF02KBgg/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">VPN Access</a>
+      <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLScyuiOM5egfCpADC-nt7jiwf7QWKahLq0pfhlPsjZEIuz81dQ/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Increase Disk Quota</a>
+    </div>
+    <div class="link-group">
+      <span class="link-group-title">Software</span>
+      <a class="quick-link" href="http://cryosparc.vpn.bio2q.org/" target="_blank" rel="noopener noreferrer">CryoSPARC</a>
+      <a class="quick-link" href="https://docs.google.com/forms/d/e/1FAIpQLSd56ZJ-NsfndG1xuJ_Gh-Ze1RBvBP9xN74kYCGrBbdaZd9u1A/viewform?usp=dialog" target="_blank" rel="noopener noreferrer">Software Install/Update</a>
+    </div>
+  </div>
+</header>
+
+<div class="tip-boundary-wrap" aria-live="polite">
+  <div class="tip-one-line"><span class="tip-label">Tip:</span><span id="tip-one-line">Loading tip...</span></div>
+</div>
+
+<main>
+  <div class="graph-grid">
+    <iframe class="grafana-embed" loading="lazy" src="http://grafana.vpn.bio2q.org/d-solo/adnmz24/render?orgId=1&theme=light&panelId=panel-41" width="450" height="200" frameborder="0"></iframe>
+    <iframe class="grafana-embed" loading="lazy" src="http://grafana.vpn.bio2q.org/d-solo/adnmz24/render?orgId=1&theme=light&panelId=panel-34" width="450" height="200" frameborder="0"></iframe>
+    <iframe class="grafana-embed" loading="lazy" src="http://grafana.vpn.bio2q.org/d-solo/adnmz24/render?orgId=1&theme=light&panelId=panel-35" width="450" height="200" frameborder="0"></iframe>
+  </div>
+
+  <section>
+    <div class="section-title">
+      <span>Cluster Resources</span>
+    </div>
+    <div class="graph-grid">
+      <iframe class="grafana-embed" loading="lazy" src="http://grafana.vpn.bio2q.org/d-solo/adnmz24/render?orgId=1&theme=light&panelId=panel-42" width="450" height="200" frameborder="0"></iframe>
+      <iframe class="grafana-embed" loading="lazy" src="http://grafana.vpn.bio2q.org/d-solo/adnmz24/render?orgId=1&theme=light&panelId=panel-25" width="450" height="200" frameborder="0"></iframe>
+      <iframe class="grafana-embed" loading="lazy" src="http://grafana.vpn.bio2q.org/d-solo/adnmz24/render?orgId=1&theme=light&panelId=panel-32" width="450" height="200" frameborder="0"></iframe>
+    </div>
+    
+  </section>
+
+  <section>
+    <div class="section-title">
+      <span>Cryo-EM Workstation Resources</span>
+    </div>
+    <div class="graph-grid">
+      <iframe class="grafana-embed" loading="lazy" src="http://grafana.vpn.bio2q.org/d-solo/adnmz24/render?orgId=1&theme=light&panelId=panel-28" width="300" height="300" frameborder="0"></iframe>
+      <iframe class="grafana-embed" loading="lazy" src="http://grafana.vpn.bio2q.org/d-solo/adnmz24/render?orgId=1&theme=light&panelId=panel-29" width="300" height="200" frameborder="0"></iframe>
+      <iframe class="grafana-embed" loading="lazy" src="http://grafana.vpn.bio2q.org/d-solo/adnmz24/render?orgId=1&theme=light&panelId=panel-30" width="300" height="200" frameborder="0"></iframe>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title">
+      <span>Storage</span>
+    </div>
+    <div class="graph-grid storage-grid">
+      <iframe class="grafana-embed" loading="lazy" src="http://grafana.vpn.bio2q.org/d-solo/adnmz24/render?orgId=1&theme=light&panelId=panel-37" width="450" height="200" frameborder="0"></iframe>
+      <iframe class="grafana-embed" loading="lazy" src="http://grafana.vpn.bio2q.org/d-solo/adnmz24/render?orgId=1&theme=light&panelId=panel-36" width="450" height="200" frameborder="0"></iframe>
+      <iframe class="grafana-embed" loading="lazy" src="http://grafana.vpn.bio2q.org/d-solo/adnmz24/render?orgId=1&theme=light&panelId=panel-38" width="450" height="200" frameborder="0"></iframe>
+      <iframe class="grafana-embed" loading="lazy" src="http://grafana.vpn.bio2q.org/d-solo/adnmz24/render?orgId=1&theme=light&panelId=panel-39" width="450" height="200" frameborder="0"></iframe>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="admin-links">
+    <a class="admin-link" href="http://grafana.vpn.bio2q.org" target="_blank" rel="noopener noreferrer">Grafana</a>
+    <a class="admin-link" href="https://neon.vpn.bio2q.org:8443/maxview/manager/login.xhtml" target="_blank" rel="noopener noreferrer">maxView (neon)</a>
+    <a class="admin-link" href="https://argon.vpn.bio2q.org:8443/maxview/manager/login.xhtml" target="_blank" rel="noopener noreferrer">maxView (argon)</a>
+    <a class="admin-link" href="https://10.181.64.36/login.php" target="_blank" rel="noopener noreferrer">TS4300</a>
+    <a class="admin-link" href="http://gold.vpn.bio2q.org:8080" target="_blank" rel="noopener noreferrer">LAM</a>
+  </div>
+</footer>
+<script>
+  const embeddedTips = [
+    "Cryo-EM: Use cp --reflink=always if you want to copy from /em/kriosdata to /em/analysis. This is blazingly fast than usual cp or rsync.",
+    "Archiving: Do not write many small files directly to tapes. Zip your data before writing to tape.",
+    "Archiving: You can browse archived file entries at /mnt/ltfs/ in gold. Note that there are only dummy files!",
+    "VSCode Remote: VS Code Server is heavy and may be restricted if it impacts server performance. Please consider using the SSH FS plugin."
+  ];
+
+  const tipLine = document.getElementById("tip-one-line");
+  if (tipLine) {
+    if (embeddedTips.length > 0) {
+      const randomIndex = Math.floor(Math.random() * embeddedTips.length);
+      tipLine.textContent = embeddedTips[randomIndex];
+    } else {
+      tipLine.textContent = "No tips available.";
+    }
+  }
+</script>
+</body>
+</html>
